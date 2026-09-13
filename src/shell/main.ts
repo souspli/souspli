@@ -326,6 +326,20 @@ interface ShellSurface {
   seedStart?: (envelopeHash: string) => Promise<Record<string, unknown>>
   seedStop?: (envelopeHash: string) => Record<string, unknown>
   seedStatus?: () => Record<string, unknown>[]
+  /** Cast a vote on a thing (+1 / -1), replacing your previous one. */
+  vote?: (envelopeHash: string, dir: 1 | -1) => Promise<Record<string, unknown>>
+  /** What the votes on a thing are worth: raw counts, and the tribe split. */
+  votes?: (envelopeHash: string) => Record<string, unknown>
+  /** The whole conversation under a thing, with depth and parent. */
+  thread?: (envelopeHash: string) => Record<string, unknown>
+  /** Forums: every group whose current version you hold, and one forum's
+   *  facts, ranked listing, posting, joining, and moderation. */
+  forums?: () => Record<string, unknown>[]
+  forum?: (rootHash: string) => Record<string, unknown>
+  forumListing?: (rootHash: string) => Record<string, unknown>
+  newForumPost?: (rootHash: string, starterKey?: string) => Record<string, unknown>
+  requestJoin?: (rootHash: string) => Record<string, unknown>
+  newVerdict?: (targetHash: string, rootHash: string, verdict: string) => Record<string, unknown>
   /** Relay connections and how far the subscription has read. */
   relays?: () => Record<string, unknown>
   addRelay?: (url: string) => Record<string, unknown>
@@ -498,6 +512,7 @@ app.whenReady().then(async () => {
         submenu: [
           { label: 'Account & Keys…', click: () => chrome.webContents.send('shell:open-account') },
           { label: 'Transfers…', click: () => chrome.webContents.send('shell:open-sharing') },
+          { label: 'Forums…', click: () => chrome.webContents.send('shell:open-forums') },
           { label: 'Relays…', click: () => chrome.webContents.send('shell:open-relays') },
           { label: 'People…', click: () => chrome.webContents.send('shell:open-people') },
           { type: 'separator' },
@@ -791,7 +806,16 @@ app.whenReady().then(async () => {
   }
 
   function getFeed(query: unknown): ThingRow[] {
-    const q = (query ?? {}) as { type?: string; author?: string; limit?: number }
+    const q = (query ?? {}) as {
+      type?: string
+      author?: string
+      replyTo?: string
+      attests?: string
+      votesOn?: string
+      inGroup?: string
+      rollUp?: boolean
+      limit?: number
+    }
     return library.feed(q)
   }
 
@@ -961,6 +985,13 @@ app.whenReady().then(async () => {
     // the chrome says so and never dresses it as verification.
     const claimed = refTarget(stored.manifest.args)
     const attested = refTarget(stored.manifest.args, 'attests')
+    const inGroup = draft ? null : refTarget(stored.manifest.args, 'inGroup')
+    // ONE tribe walk per open, shared by everything below that needs it. It is
+    // a graph walk over several queries, and the open path is latency the
+    // human feels -- two of them because two callers each asked for their own
+    // is the kind of cost that never shows up in a test and always shows up on
+    // a slow machine.
+    const tribe = myTribe()
     o.header = {
       ...m.header,
       name: nv?.status === 'verified' ? nv.name : null,
@@ -977,7 +1008,13 @@ app.whenReady().then(async () => {
       attests: attested,
       attestsKnown: attested ? library.get(attested) !== null : false,
       attestCount: draft ? 0 : library.countRefsTo(envelopeHash, 'attests'),
-      ...trustFacts(stored, draft !== null),
+      ...trustFacts(stored, draft !== null, tribe),
+      // Which forum this claims to be in, and what the votes on it are worth.
+      // Both are claims about a thing, so both live here beside replyTo and
+      // attests rather than anywhere that reads as verified.
+      inGroup,
+      inGroupKnown: inGroup !== null && library.groupCurrent(inGroup) !== null,
+      votes: draft ? null : voteFacts(envelopeHash, tribe),
       // A draft is signed by nobody, so it is not a document with signatures.
       ...(draft ? {} : documentFacts(stored.row.manifestHash)),
       ...(draft ? {} : versionFacts(stored.row)),
@@ -1242,7 +1279,12 @@ app.whenReady().then(async () => {
   function newComment(targetHash: unknown): Record<string, unknown> {
     if (typeof targetHash !== 'string' || !HEX64.test(targetHash)) return { error: 'bad hash' }
     if (!library.get(targetHash)) return { error: 'that thing is not in your library' }
-    return newDraft('starter:comment', { replyTo: targetHash })
+    // A reply inside a forum stays in that forum. Carried from the thing being
+    // answered rather than asked for: a reader pressing Comment on a post is
+    // not separately deciding to post to the forum, and a reply that silently
+    // left it would vanish from the only place anyone is reading.
+    const group = inGroupOf(targetHash)
+    return newDraft('starter:comment', { replyTo: targetHash, ...(group ? { inGroup: group } : {}) })
   }
 
   /** Start an attestation about `targetHash`. Same shape as newComment: a
@@ -1273,8 +1315,11 @@ app.whenReady().then(async () => {
   /** Keys reachable from YOUR key by vouches. Recomputed per call: the graph
    *  is small, and a stale tribe is worse than a cheap walk. */
   function myTribe(): Map<string, { hops: number; via: string[] }> {
-    return library.tribe(keyring.signer.scheme, hex(keyring.identity.address).toLowerCase())
+    return library.tribe(keyring.signer.scheme, myKeyHex())
   }
+
+  /** Your own author key, as the library stores it. */
+  const myKeyHex = (): string => hex(keyring.identity.address).toLowerCase()
 
   /** Who vouches for a key, with your name for each voucher and how far from
    *  you they sit. `hops` is null for a voucher outside your tribe -- which is
@@ -1376,14 +1421,327 @@ app.whenReady().then(async () => {
     return { count: library.countRefsTo(h, 'attests'), rows, fromTribe: rows.filter((r) => r.hops !== null).length }
   }
 
+  // ── The forum ──────────────────────────────────────────────────────────────
+  // A forum is a GROUP: a roster with roles, kept by whoever founded it and
+  // amended through its version chain. It needed no new thing type, which is
+  // the point -- a forum that required new primitives would have meant the
+  // primitives were wrong.
+  //
+  //   a place            a group, named by its chain's ROOT hash
+  //   a post in it       any thing carrying `inGroup: <root>`
+  //   a reply            `replyTo`, walked as deep as it goes
+  //   a moderator        a roster entry whose role says so
+  //   a verdict          an attestation by one of those keys
+  //   a vote             the one genuinely new type
+  //
+  // Every one of those is a CLAIM. What stops the claims from being worth
+  // anything on their own is that ranking runs through your tribe and
+  // moderation runs through a roster you chose to hold.
+
+  /** Which forum a thing says it belongs to, or null. */
+  function inGroupOf(envelopeHash: string): string | null {
+    const stored = library.load(envelopeHash)
+    return stored ? refTarget(stored.manifest.args, 'inGroup') : null
+  }
+
+  /** Vote counts for a thing, split by whether the voter is someone you
+   *  reached through your own vouches.
+   *
+   *  BOTH numbers, always, because they answer different questions. The raw
+   *  count is what everyone sees and is free to manufacture -- a thousand
+   *  keys cost nothing. The tribe count is what it is worth TO YOU, and
+   *  cannot be manufactured without first getting inside your vouches. */
+  function voteFacts(targetHash: string, tribe = myTribe()): Record<string, unknown> {
+    const rows = library.votesOn(targetHash)
+    let up = 0
+    let down = 0
+    let tribeUp = 0
+    let tribeDown = 0
+    for (const v of rows) {
+      const inTribe = tribe.has(`${v.voterScheme}:${v.voterKey}`)
+      if (v.dir > 0) {
+        up++
+        if (inTribe) tribeUp++
+      } else {
+        down++
+        if (inTribe) tribeDown++
+      }
+    }
+    const mine = library.myVote(keyring.signer.scheme, myKeyHex(), targetHash)
+    return {
+      up,
+      down,
+      score: up - down,
+      tribeUp,
+      tribeDown,
+      tribeScore: tribeUp - tribeDown,
+      // Whether YOUR key has voted, and which way -- so the control can show
+      // its state rather than inviting you to vote twice.
+      mine: mine ? mine.dir : 0
+    }
+  }
+
+  /** Cast a vote, replacing whatever you said before.
+   *
+   *  Signed HERE with no confirm dialog, exactly as Copy is: the confirm
+   *  exists because a PROGRAM asked to publish something in your name and you
+   *  must see what that is. A vote comes from a control in trusted chrome, on
+   *  a thing already on your screen -- the intent was the click. Showing a
+   *  dialog that says {votesOn, dir} back to you would be friction, not
+   *  consent.
+   *
+   *  A signed thing cannot be unsaid, so changing your mind publishes a LATER
+   *  vote; the library counts only each key's latest. Voting the same way
+   *  twice is refused rather than making a second identical thing. */
+  async function castVote(targetHash: unknown, direction: unknown): Promise<Record<string, unknown>> {
+    if (typeof targetHash !== 'string' || !HEX64.test(targetHash)) return { error: 'bad hash' }
+    if (direction !== 1 && direction !== -1) return { error: 'a vote is +1 or -1' }
+    if (!library.get(targetHash)) return { error: 'that thing is not in your library' }
+    const current = library.myVote(keyring.signer.scheme, myKeyHex(), targetHash)
+    if (current && current.dir === direction) return { error: 'you have already voted that way' }
+    const starter = starterByKey('starter:vote')
+    if (!starter) return { error: 'the vote program is missing' }
+    const tar = await buildBundle(keyring.signer, {
+      program: starterBytes(starter),
+      type: 'vote',
+      args: jsToCbor({ votesOn: targetHash, dir: direction }),
+      attachments: new Map(),
+      enc: { e: NOSTR_ENC_SCHEME, ek: keyring.identity.nostrPubkey }
+    })
+    const outcome = await ingestBytes(tar)
+    if (outcome.status !== 'valid') return { error: String(outcome.reason ?? outcome.status) }
+    return { ...voteFacts(targetHash), envelopeHash: outcome.envelopeHash }
+  }
+
+  /** The whole conversation under a thing, each entry with its parent, its
+   *  depth, and what the votes on it are worth to you. */
+  function threadFor(rootHash: unknown): Record<string, unknown> {
+    if (typeof rootHash !== 'string' || !HEX64.test(rootHash)) return { rows: [] }
+    const tribe = myTribe()
+    const rows = library.thread(rootHash).map((n) => ({
+      ...n.row,
+      parent: n.parent,
+      depth: n.depth,
+      authorHops: tribe.get(`${n.row.authorScheme}:${n.row.authorKey}`)?.hops ?? null,
+      votes: voteFacts(n.row.envelopeHash, tribe)
+    }))
+    return { rows, count: rows.length }
+  }
+
+  /** The moderators a forum's CURRENT roster names, lowercased for comparison.
+   *
+   *  Read from the roster you hold, which is the whole of a moderator's
+   *  authority here: hold no group and nobody moderates anything for you, and
+   *  a later revision that drops someone ends their reach the moment you have
+   *  it. Being named is the keeper's claim, not the moderator's consent. */
+  function moderatorsOf(rootHash: string): Map<string, string> {
+    const out = new Map<string, string>()
+    const current = library.groupCurrent(rootHash)
+    if (!current) return out
+    for (const m of library.groupMembers(current.envelopeHash)) {
+      if (/^mod(erator)?$/i.test(m.role.trim())) out.set(`${m.scheme}:${m.key.toLowerCase()}`, m.name)
+    }
+    return out
+  }
+
+  /** A moderator's verdict on a thing, if one of this forum's moderators has
+   *  published an attestation about it.
+   *
+   *  Nothing is ever deleted or hidden from you: a verdict is one signed
+   *  opinion by a named key, and the shell folds the post behind a line that
+   *  says WHO and WHY, with the post still one click away. Disagreeing has to
+   *  stay possible -- that is the difference between a forum and a memory
+   *  hole. */
+  function verdictOn(targetHash: string, rootHash: string, mods = moderatorsOf(rootHash)): Record<string, unknown> | null {
+    if (mods.size === 0) return null
+    for (const row of library.attestationsOn(targetHash)) {
+      const id = `${row.authorScheme}:${row.authorKey.toLowerCase()}`
+      if (!mods.has(id)) continue
+      const stored = library.load(row.envelopeHash)
+      if (!stored) continue
+      const args = cborToJs(stored.manifest.args) as Record<string, unknown>
+      // The verdict must name the same forum, or a moderator of one group
+      // would be moderating every group they touch.
+      if (refTarget(stored.manifest.args, 'inGroup') !== rootHash) continue
+      const verdict = typeof args.verdict === 'string' ? args.verdict.trim().toLowerCase() : ''
+      if (verdict !== 'hide' && verdict !== 'endorse') continue
+      return {
+        verdict,
+        by: row.authorKey,
+        byName: mods.get(id) || library.petname(row.authorScheme, row.authorKey)?.name || '',
+        why: typeof args.statement === 'string' ? args.statement : '',
+        envelopeHash: row.envelopeHash
+      }
+    }
+    return null
+  }
+
+  /** Everything about a forum: what it calls itself, who keeps it, who
+   *  moderates, and who has asked to get in. */
+  function forumFacts(rootHash: unknown): Record<string, unknown> {
+    if (typeof rootHash !== 'string' || !HEX64.test(rootHash)) return { error: 'bad hash' }
+    const current = library.groupCurrent(rootHash)
+    if (!current) return { error: 'no group by that hash in your library' }
+    const stored = library.load(current.envelopeHash)
+    const args = stored ? (cborToJs(stored.manifest.args) as { name?: unknown; purpose?: unknown }) : {}
+    const members = library.groupMembers(current.envelopeHash)
+    const roster = new Set(members.map((m) => `${m.scheme}:${m.key.toLowerCase()}`))
+    const me = `${keyring.signer.scheme}:${myKeyHex()}`
+    // A request is pending while its author is not on the roster. Once the
+    // keeper writes them in, the request stops being pending without anyone
+    // having to mark it -- the roster IS the answer.
+    const pending = library
+      .feed({ type: 'join-request', inGroup: rootHash, limit: 200 })
+      .filter((r) => !roster.has(`${r.authorScheme}:${r.authorKey.toLowerCase()}`))
+      .map((r) => ({
+        envelopeHash: r.envelopeHash,
+        authorKey: r.authorKey,
+        authorScheme: r.authorScheme,
+        petname: library.petname(r.authorScheme, r.authorKey)?.name ?? null
+      }))
+    const mods = moderatorsOf(rootHash)
+    return {
+      root: rootHash,
+      current: current.envelopeHash,
+      keeper: current.authorKey,
+      keeperIsMe: current.authorKey === myKeyHex(),
+      name: typeof args.name === 'string' ? args.name : '',
+      purpose: typeof args.purpose === 'string' ? args.purpose : '',
+      members: members.length,
+      moderators: [...mods.entries()].map(([id, name]) => ({ key: id.split(':')[1] ?? '', name })),
+      iAmModerator: mods.has(me),
+      iAmMember: roster.has(me),
+      pending
+    }
+  }
+
+  /** Things that live in a forum without being posts in it.
+   *
+   *  All three carry `inGroup` because they have to travel with the forum, and
+   *  none of them is something anyone came to read: a vote is activity, a join
+   *  request is addressed to the keeper, and a verdict is the moderation
+   *  machinery itself. Listing them would let a busy thread's own bookkeeping
+   *  outrank the thread.
+   *
+   *  A verdict counts here whoever signed it. A stranger's "hide this" is not
+   *  a forum post either -- it is a moderation attempt that no reader honours,
+   *  and it belongs in the same bin as the ones that work. */
+  function isForumMachinery(row: ThingRow): boolean {
+    if (row.type === 'vote' || row.type === 'join-request') return true
+    if (row.type !== 'attestation') return false
+    const stored = library.load(row.envelopeHash)
+    if (!stored) return false
+    const args = cborToJs(stored.manifest.args) as Record<string, unknown>
+    return typeof args.verdict === 'string' && refTarget(stored.manifest.args, 'inGroup') !== null
+  }
+
+  /** A forum's posts, ranked.
+   *
+   *  Ordered by TRIBE score first, then the raw score, then recency -- and
+   *  both numbers travel with every row, because an ordering nobody can
+   *  explain is worse than no ordering at all. When your tribe is empty every
+   *  tribe score is 0 and this silently degrades to raw popularity, which is
+   *  exactly the manufacturable ranking, so `tribeEmpty` says so and the
+   *  chrome must repeat it rather than let a new reader assume otherwise. */
+  function forumListing(rootHash: unknown): Record<string, unknown> {
+    if (typeof rootHash !== 'string' || !HEX64.test(rootHash)) return { error: 'bad hash' }
+    const tribe = myTribe()
+    const mods = moderatorsOf(rootHash)
+    const rows = library
+      .forumPosts(rootHash)
+      .filter((r) => !isForumMachinery(r))
+      // A reply belongs under the post it answers, not on the front page.
+      // Replies carry `inGroup` so they stay with their forum when they
+      // travel -- which is right, and is also why they have to be folded
+      // here rather than left to arrive as posts of their own.
+      //
+      // Scoped to targets actually HELD, exactly as the feed's roll-up is: a
+      // reply to something you do not have is the only copy you have of that
+      // conversation, and dropping it would hide it completely.
+      .filter((r) => {
+        const answers = refTarget(library.load(r.envelopeHash)?.manifest.args ?? null)
+        return answers === null || library.get(answers) === null
+      })
+      .map((r) => {
+        const votes = voteFacts(r.envelopeHash, tribe) as Record<string, number>
+        return {
+          ...r,
+          authorHops: tribe.get(`${r.authorScheme}:${r.authorKey}`)?.hops ?? null,
+          votes,
+          replies: library.countRefsTo(r.envelopeHash),
+          verdict: verdictOn(r.envelopeHash, rootHash, mods)
+        }
+      })
+    rows.sort((a, b) => {
+      const at = (a.votes as Record<string, number>).tribeScore ?? 0
+      const bt = (b.votes as Record<string, number>).tribeScore ?? 0
+      if (at !== bt) return bt - at
+      const ar = (a.votes as Record<string, number>).score ?? 0
+      const br = (b.votes as Record<string, number>).score ?? 0
+      if (ar !== br) return br - ar
+      return b.receivedAt - a.receivedAt
+    })
+    return { rows, tribeEmpty: tribe.size === 0 }
+  }
+
+  /** Groups in this library that could be read as forums: every group whose
+   *  current version you hold. */
+  function forums(): Record<string, unknown>[] {
+    const seen = new Set<string>()
+    const out: Record<string, unknown>[] = []
+    for (const row of library.feed({ type: 'group', limit: 200 })) {
+      // The feed already collapses a chain to its current version, so `path`
+      // is the root for a later version and the row IS the root otherwise.
+      const root = row.path ?? row.envelopeHash
+      if (seen.has(root)) continue
+      seen.add(root)
+      const facts = forumFacts(root)
+      if (!facts.error) out.push({ ...facts, posts: library.forumPosts(root, 1000).length })
+    }
+    return out
+  }
+
+  /** Start a post in a forum: an ordinary thing that says which forum it is
+   *  in. Nothing about the forum changes -- being tagged into one is a claim,
+   *  and the roster never agreed to it. */
+  function newForumPost(rootHash: unknown, starterKey: unknown): Record<string, unknown> {
+    if (typeof rootHash !== 'string' || !HEX64.test(rootHash)) return { error: 'bad hash' }
+    if (!library.groupCurrent(rootHash)) return { error: 'no group by that hash in your library' }
+    return newDraft(typeof starterKey === 'string' && starterKey ? starterKey : 'starter:article', {
+      inGroup: rootHash
+    })
+  }
+
+  /** Ask to be put on a group's roster. Asking is not joining: only the
+   *  keeper can publish a roster that names you. */
+  function requestJoin(rootHash: unknown): Record<string, unknown> {
+    if (typeof rootHash !== 'string' || !HEX64.test(rootHash)) return { error: 'bad hash' }
+    if (!library.groupCurrent(rootHash)) return { error: 'no group by that hash in your library' }
+    return newDraft('starter:join-request', { inGroup: rootHash })
+  }
+
+  /** Start a moderator's verdict on a post: an attestation naming the forum.
+   *  Refused unless the roster you hold names you a moderator of it -- not as
+   *  security (nobody can stop you signing anything) but because publishing a
+   *  verdict nobody will honour helps no one. */
+  function newVerdict(targetHash: unknown, rootHash: unknown, verdict: unknown): Record<string, unknown> {
+    if (typeof targetHash !== 'string' || !HEX64.test(targetHash)) return { error: 'bad hash' }
+    if (typeof rootHash !== 'string' || !HEX64.test(rootHash)) return { error: 'bad group hash' }
+    const v = typeof verdict === 'string' ? verdict.trim().toLowerCase() : ''
+    if (v !== 'hide' && v !== 'endorse') return { error: 'a verdict is hide or endorse' }
+    if (!moderatorsOf(rootHash).has(`${keyring.signer.scheme}:${myKeyHex()}`)) {
+      return { error: 'this forum’s roster does not name you a moderator' }
+    }
+    return newDraft('starter:attestation', { attests: targetHash, inGroup: rootHash, verdict: v })
+  }
+
   /** The vouch-shaped header facts for one thing: where its author sits in
    *  your tribe, and -- when it IS a vouch -- whose key it speaks about.
    *
    *  Recomputed on every open rather than cached with the mount, for the same
    *  reason the reply counts are: a vouch published since is real news. */
-  function trustFacts(stored: StoredThing, draft: boolean): Record<string, unknown> {
+  function trustFacts(stored: StoredThing, draft: boolean, tribe = myTribe()): Record<string, unknown> {
     const subject = draft ? null : vouchSubject(stored.manifest.args)
-    const tribe = myTribe()
     return {
       // Never for a draft: nothing is signed, so there is no author yet.
       authorHops: draft ? null : tribe.get(`${stored.row.authorScheme}:${stored.row.authorKey}`)?.hops ?? null,
@@ -2137,12 +2495,17 @@ app.whenReady().then(async () => {
       return { error: 'too large to post inline — start seeding it first, so the event can point at it' }
     }
     const replyTo = refTarget(library.load(envelopeHash)?.manifest.args ?? null)
+    const forumOfPost = inGroupOf(envelopeHash)
     const event = await buildThingEvent(
       {
         envelopeHash,
         type: row.type,
         ...(inline ? { bundle: exported.tar } : { fetchLocator: locator! }),
-        ...(row.path ? { group: row.path } : {}),
+        // `thing-group` is which FORUM this belongs to. A thing's own chain
+        // path is a different fact entirely -- it says which line of versions
+        // this is -- and tagging an event with it would put every amended
+        // thing in a "group" named after itself.
+        ...(forumOfPost ? { group: forumOfPost } : {}),
         ...(replyTo ? { replyTo } : {}),
         createdAt: Math.floor(Date.now() / 1000)
       },
@@ -2515,6 +2878,20 @@ app.whenReady().then(async () => {
     typeof h === 'string' ? stopSeeding(h) : { stopped: false }
   )
   ipcMain.handle('shell:seed-status', () => seedingStatus())
+  ipcMain.handle('shell:vote', async (_e, h: unknown, dir: unknown) => await castVote(h, dir))
+  ipcMain.handle('shell:votes', (_e, h: unknown) =>
+    typeof h === 'string' && HEX64.test(h) ? voteFacts(h) : { error: 'bad hash' }
+  )
+  ipcMain.handle('shell:thread', (_e, h: unknown) => threadFor(h))
+  ipcMain.handle('shell:forums', () => forums())
+  ipcMain.handle('shell:forum', (_e, h: unknown) => forumFacts(h))
+  ipcMain.handle('shell:forum-listing', (_e, h: unknown) => forumListing(h))
+  ipcMain.handle('shell:forum-post', (_e, h: unknown, key: unknown) => newForumPost(h, key))
+  ipcMain.handle('shell:request-join', (_e, h: unknown) => requestJoin(h))
+  ipcMain.handle('shell:new-verdict', (_e, h: unknown, g: unknown, v: unknown) => newVerdict(h, g, v))
+  ipcMain.handle('shell:in-group', (_e, h: unknown) =>
+    typeof h === 'string' && HEX64.test(h) ? inGroupOf(h) : null
+  )
   ipcMain.handle('shell:relays', () => relayState())
   ipcMain.handle('shell:relay-add', (_e, url: unknown) => addRelay(url))
   ipcMain.handle('shell:relay-remove', (_e, url: unknown) => removeRelay(url))
@@ -2543,6 +2920,15 @@ app.whenReady().then(async () => {
   shell.seedStart = (h) => startSeeding(h)
   shell.seedStop = (h) => stopSeeding(h)
   shell.seedStatus = () => seedingStatus()
+  shell.vote = (h, dir) => castVote(h, dir)
+  shell.votes = (h) => voteFacts(h)
+  shell.thread = (h) => threadFor(h)
+  shell.forums = () => forums()
+  shell.forum = (h) => forumFacts(h)
+  shell.forumListing = (h) => forumListing(h)
+  shell.newForumPost = (h, key) => newForumPost(h, key)
+  shell.requestJoin = (h) => requestJoin(h)
+  shell.newVerdict = (h, g, v) => newVerdict(h, g, v)
   shell.relays = () => relayState()
   shell.addRelay = (url) => addRelay(url)
   shell.removeRelay = (url) => removeRelay(url)

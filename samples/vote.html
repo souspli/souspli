@@ -1,0 +1,165 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>vote</title>
+<style>
+  body { margin: 0; font: 15px/1.55 system-ui, sans-serif; background: #1d2320; color: #d8d4c8;
+         display: flex; align-items: flex-start; justify-content: center; min-height: 100vh;
+         padding: 24px; box-sizing: border-box; }
+  .vote { background: #262c28; border: 1px solid #39413b; border-radius: 4px;
+          width: 26em; max-width: 100%; padding: 16px 18px; }
+  .vote.up { border-left: 3px solid #7a9f6f; }
+  .vote.down { border-left: 3px solid #a8776a; }
+  .vote.none { border-left: 3px solid #5a6560; }
+  .mark { display: flex; align-items: center; gap: 10px; }
+  .arrow { font-size: 26px; line-height: 1; }
+  .arrow.up { color: #8fbf80; }
+  .arrow.down { color: #c9907f; }
+  .arrow.none { color: #6f7a73; }
+  .word { font-size: 17px; }
+  .word.none { color: #7d8a80; font-style: italic; }
+  .on { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid #39413b; font-size: 12px; color: #8a978d; }
+  .on code { font-family: ui-monospace, Menlo, monospace; color: #a9b8ae; }
+  .why { margin: 12px 0 0; white-space: pre-wrap; color: #b9b2a2; }
+  .weight { margin: 14px 0 0; font-size: 12px; color: #8a978d; font-style: italic; }
+
+  label { display: block; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #8a978d;
+          margin: 14px 0 6px; }
+  input, textarea { font: inherit; width: 100%; box-sizing: border-box; background: #1f2521; color: #e6e2d6;
+                    border: 1px solid #3f4a43; border-radius: 4px; padding: 8px 10px; }
+  input.h { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  textarea { min-height: 4em; resize: vertical; }
+  .dirs { display: flex; gap: 8px; }
+  button { font: inherit; background: #2f3a33; color: #dcd7cd; border: 1px solid #46534a;
+           border-radius: 4px; padding: 6px 14px; cursor: pointer; }
+  button:hover { background: #384539; }
+  button.sel { background: #3d4c40; border-color: #6d8a72; color: #eae5d9; }
+  .hint { margin-top: 12px; font-size: 12px; color: #7d8a80; }
+</style>
+</head>
+<body>
+  <div class="vote none" id="card"><div id="app"></div></div>
+  <script>
+    'use strict';
+    // A vote on another thing.
+    //
+    // State: args {votesOn, dir, why}. `dir` is +1 or -1 and NOTHING else —
+    // a vote is one key saying yes or no, and a weight a program could pick
+    // would let a single key count for as much as it liked.
+    //
+    // A vote is about a THING. Saying you know someone's KEY is a vouch, and
+    // the two are deliberately different relations: the shell walks vouch
+    // edges to build your tribe, so an upvote that was a vouch would drag
+    // every author you ever agreed with into your trust graph.
+    //
+    // What a vote is worth is not this program's business and never appears
+    // here. The shell counts them in trusted chrome, and says how many came
+    // from people you reached through your own vouches — because a raw count
+    // is free to manufacture and that sentence is the only defence.
+    //
+    // Normally you never see this program's edit mode: the shell's ▲ ▼ sign a
+    // vote directly. Editing one by hand is for adding a reason.
+    var a = window.bridge.getArgs() || {};
+    var args = (a && typeof a.args === 'object' && a.args !== null) ? a.args : {};
+    var app = document.getElementById('app');
+    var card = document.getElementById('card');
+
+    function str(v) { return typeof v === 'string' ? v : ''; }
+    function dirOf(v) { return v === 1 || v === -1 ? v : 0; }
+
+    function el(tag, cls, text) {
+      var e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined) e.textContent = text;
+      return e;
+    }
+
+    function shortHash(h) {
+      return h.length > 16 ? h.slice(0, 8) + '…' + h.slice(-6) : h;
+    }
+
+    function view() {
+      app.replaceChildren();
+      var dir = dirOf(args.dir);
+      var kind = dir === 1 ? 'up' : dir === -1 ? 'down' : 'none';
+      card.className = 'vote ' + kind;
+
+      var mark = el('div', 'mark');
+      mark.append(el('span', 'arrow ' + kind, dir === 1 ? '▲' : dir === -1 ? '▼' : '—'));
+      mark.append(el('span', 'word ' + kind,
+        dir === 1 ? 'in favour' : dir === -1 ? 'against' : 'no direction given'));
+      app.append(mark);
+
+      var on = str(args.votesOn);
+      var p = el('p', 'on');
+      if (on) {
+        p.append(document.createTextNode('on '));
+        p.append(el('code', null, shortHash(on)));
+      } else {
+        p.textContent = 'This vote names nothing to vote on.';
+      }
+      app.append(p);
+
+      if (str(args.why)) app.append(el('p', 'why', args.why));
+
+      app.append(el('p', 'weight',
+        'One key, one vote. What it is worth depends on who is casting it — which is the shell’s to say, not this program’s.'));
+    }
+
+    function edit() {
+      app.replaceChildren();
+      var dir = dirOf(args.dir);
+
+      app.append(el('label', null, 'which way'));
+      var dirs = el('div', 'dirs');
+      var buttons = {};
+      [[1, '▲ In favour'], [-1, '▼ Against']].forEach(function (pair) {
+        var b = el('button', dir === pair[0] ? 'sel' : null, pair[1]);
+        b.addEventListener('click', function () {
+          args.dir = pair[0];
+          emit();
+          edit();
+        });
+        buttons[pair[0]] = b;
+        dirs.append(b);
+      });
+      app.append(dirs);
+
+      app.append(el('label', null, 'the thing you are voting on'));
+      var h = el('input', 'h');
+      h.type = 'text';
+      h.value = str(args.votesOn);
+      h.placeholder = 'the envelope hash of the thing';
+      h.addEventListener('input', function () {
+        args.votesOn = h.value.trim();
+        emit();
+      });
+      app.append(h);
+
+      app.append(el('label', null, 'why (optional)'));
+      var why = el('textarea');
+      why.value = str(args.why);
+      why.addEventListener('input', function () {
+        args.why = why.value;
+        emit();
+      });
+      app.append(why);
+
+      app.append(el('p', 'hint',
+        'Use ▲ ▼ on the thing itself instead — the shell fills this in and signs it in one press. Hand-editing is for adding a reason.'));
+    }
+
+    // Args are WHOLE-SET replacement on every emit, so everything the vote
+    // carries goes out each time. Dropping votesOn would unpoint the vote.
+    function emit() {
+      var out = { dir: dirOf(args.dir) || 1 };
+      if (str(args.votesOn)) out.votesOn = str(args.votesOn);
+      if (str(args.why)) out.why = str(args.why);
+      window.bridge.emit('draft', { type: 'vote', args: out });
+    }
+
+    if (a.mode === 'edit') edit(); else view();
+  </script>
+</body>
+</html>

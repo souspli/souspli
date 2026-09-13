@@ -290,6 +290,152 @@ async function group(c: Cast, log: (s: string) => void): Promise<void> {
   log('  group: editorial roster, amended once — Edith written out, two added')
 }
 
+/** A forum, so the thing the whole slice is for is actually there to look at.
+ *
+ *  The scenario is built around the one property that is hard to believe until
+ *  you see it: the SAME forum ranks differently in different libraries. A post
+ *  three strangers shouted for outranks nothing, while a post one person you
+ *  vouched for liked goes to the top -- and the two readers below are looking
+ *  at identical bytes. */
+async function forum(c: Cast, log: (s: string) => void): Promise<void> {
+  const readers = ['ada', 'grace', 'alan', 'katherine', 'dorothy', 'mary', 'joan', 'edith', 'linus'].map(
+    (k) => c[k]!
+  )
+  const member = (a: OpenAccount, role: string): Record<string, string> => ({
+    key: a.who.address,
+    scheme: 'eth-eip191',
+    role,
+    name: a.who.name
+  })
+
+  // Ada keeps it; Grace moderates. A moderator's whole authority is this line
+  // in a roster, in the libraries that hold it.
+  const forumRoot = await publish(
+    c.ada!,
+    {
+      type: 'group',
+      created: T0 + 11 * DAY,
+      args: {
+        name: 'Meridian Press — the wire',
+        purpose: 'Anything worth the desk’s attention. Post, argue, vote.',
+        members: [member(c.ada!, 'founder'), member(c.grace!, 'moderator'), member(c.alan!, 'member')],
+        notes: 'Grace moderates. Being listed here is Ada’s claim, not your consent.'
+      }
+    },
+    readers
+  )
+  const root = forumRoot.envelopeHash
+
+  const post = async (who: OpenAccount, title: string, body: string, at: number): Promise<string> =>
+    (
+      await publish(
+        who,
+        {
+          type: 'article',
+          created: at,
+          args: { headline: title, standfirst: '', body: [{ kind: 'text', text: body }], inGroup: root }
+        },
+        readers
+      )
+    ).envelopeHash
+
+  const shouted = await post(
+    c.mary!,
+    'Ten tools every desk needs',
+    'A list. Mostly of things the author sells.',
+    T0 + 11 * DAY + 3600
+  )
+  const quiet = await post(
+    c.katherine!,
+    'The Harbour Yard figures do not add up',
+    'Working through the published numbers line by line.',
+    T0 + 11 * DAY + 7200
+  )
+  const spam = await post(c.linus!, 'BUY GOLD NOW', 'Click here.', T0 + 11 * DAY + 9000)
+
+  const vote = async (who: OpenAccount, on: string, dir: 1 | -1, at: number): Promise<void> => {
+    await publish(who, { type: 'vote', created: at, args: { votesOn: on, dir } }, readers)
+  }
+
+  // Four keys nobody in the press has vouched for pile onto the listicle.
+  // Their raw count is the biggest number in the forum and is worth nothing.
+  const strangers = ['kestrel', 'marlow', 'vesper', 'quill'].map((k) => c[k]).filter(Boolean) as OpenAccount[]
+  for (let i = 0; i < strangers.length; i++) {
+    await vote(strangers[i]!, shouted, 1, T0 + 11 * DAY + 10_000 + i * 60)
+  }
+  // Two colleagues -- people Ada actually vouched for -- prefer the other one.
+  await vote(c.grace!, quiet, 1, T0 + 11 * DAY + 11_000)
+  await vote(c.alan!, quiet, 1, T0 + 11 * DAY + 11_100)
+  await vote(c.katherine!, shouted, -1, T0 + 11 * DAY + 11_200)
+
+  // A thread, so replies have somewhere to nest.
+  const r1 = (
+    await publish(
+      c.alan!,
+      {
+        type: 'comment',
+        created: T0 + 11 * DAY + 12_000,
+        args: { body: 'Which figures exactly? The Q2 ones were restated.', replyTo: quiet, inGroup: root }
+      },
+      readers
+    )
+  ).envelopeHash
+  const r2 = (
+    await publish(
+      c.katherine!,
+      {
+        type: 'comment',
+        created: T0 + 11 * DAY + 13_000,
+        args: { body: 'Both. The restatement is the part that does not reconcile.', replyTo: r1, inGroup: root }
+      },
+      readers
+    )
+  ).envelopeHash
+  await publish(
+    c.grace!,
+    {
+      type: 'comment',
+      created: T0 + 11 * DAY + 14_000,
+      args: { body: 'Worth a follow-up. Filing it.', replyTo: r2, inGroup: root }
+    },
+    readers
+  )
+
+  // Grace moderates the spam. A verdict, not a deletion: every library still
+  // holds the post, and every reader can press "show anyway".
+  await publish(
+    c.grace!,
+    {
+      type: 'attestation',
+      created: T0 + 11 * DAY + 15_000,
+      args: {
+        attests: spam,
+        inGroup: root,
+        verdict: 'hide',
+        statement: 'Off topic and selling something.'
+      }
+    },
+    readers
+  )
+
+  // Somebody outside asks to get in. Nobody has admitted them, so it stays
+  // pending -- which the roster, not a flag, is what decides.
+  if (c.kestrel) {
+    await publish(
+      c.kestrel,
+      {
+        type: 'join-request',
+        created: T0 + 11 * DAY + 16_000,
+        args: { inGroup: root, calledMe: c.kestrel.who.name, say: 'I file on shipping. Would like in.' }
+      },
+      readers
+    )
+  }
+
+  log('  forum: the wire — 3 posts, a 3-deep thread, one hidden by Grace, one asking to join')
+  log(`         ranking differs by reader: pnpm world show ada  vs  pnpm world show linus`)
+}
+
 /** An invoice, so there is one to look at. Money is in minor units and
  *  quantities in thousandths because canonical CBOR forbids floats -- 2.5 hours
  *  at £180 is quantity 2500, unitPrice 18000. */
@@ -414,6 +560,7 @@ export async function buildWorld(accounts: OpenAccount[], log: (s: string) => vo
   await uninvitedSignature(c, log)
   await articleWithAttestations(c, log)
   await group(c, log)
+  await forum(c, log)
   await invoice(c, log)
   await everyday(c, log)
 }

@@ -38,6 +38,10 @@ export interface ThingRow {
   sealed: boolean
   read: boolean
   isFork: boolean
+  /** Only on a rolled-up feed: how much conversation sits under this thing.
+   *  `replies` counts the whole subtree, not just direct answers, because
+   *  "12 replies" on a thread that is 12 deep should not read as 1. */
+  activity?: { replies: number; up: number; down: number }
   /** How many envelopes sign this row's manifest, and whether the document
    *  names signatories at all. Only meaningful together: a plain thing copied
    *  twice also has two signatures over one manifest, and is not a contract. */
@@ -52,6 +56,14 @@ export interface FeedQuery {
   replyTo?: string
   /** Things claiming to attest to this envelope hash. */
   attests?: string
+  /** Things claiming to vote on this envelope hash. */
+  votesOn?: string
+  /** Things claiming to belong to this group (a forum's root hash). */
+  inGroup?: string
+  /** Fold the feed to what is worth its own row: a vote is activity rather
+   *  than content, and a reply belongs under the thing it answers. Off by
+   *  default so every existing caller keeps the flat list it asked for. */
+  rollUp?: boolean
   limit?: number
   offset?: number
 }
@@ -73,14 +85,17 @@ export interface DraftRow {
   updated: number
 }
 
-/** The reference a manifest's args CLAIM, or null. Pure and shared by store()
- *  and the header so the index and the UI can never disagree. Only a bare
- *  64-hex string counts — anything else is just program data. */
 /** The relations the shell indexes, which are also the args field names that
- *  carry them. Both are author CLAIMS and neither is verified: anyone may claim
- *  to reply to, or to attest to, anything at all. The shell indexes the claim
- *  so a thing can show what points at it; it never treats one as evidence. */
-export const INDEXED_RELS = ['replyTo', 'attests'] as const
+ *  carry them. Every one is an author CLAIM and none is verified: anyone may
+ *  claim to reply to, attest to, or vote on anything at all, and anyone may
+ *  claim their thing belongs to any group. The shell indexes the claim so a
+ *  thing can show what points at it; it never treats one as evidence.
+ *
+ *  `inGroup` is the one that reads like membership and is not: a group's
+ *  roster never consented to what gets tagged into it. What keeps that from
+ *  mattering is that ranking and moderation both run through keys YOU reached
+ *  -- see tribe() and the moderator roles a roster declares. */
+export const INDEXED_RELS = ['replyTo', 'attests', 'votesOn', 'inGroup'] as const
 export type IndexedRel = (typeof INDEXED_RELS)[number]
 
 /** Read a string field out of untrusted args (Map or plain object). */
@@ -102,6 +117,25 @@ export function vouchSubject(args: unknown): { scheme: string; key: string } | n
   if (!/^[0-9a-f]{40,64}$/.test(key)) return null
   const scheme = argString(args, 'aboutScheme') || 'eth-eip191'
   return { scheme, key }
+}
+
+/** What a vote CLAIMS: which thing, and which way.
+ *
+ *  Direction is exactly +1 or -1. Anything else -- 0, 7, a string, a float
+ *  (which canonical CBOR refuses outright) -- is not a vote, it is program
+ *  data, and is ignored rather than coerced into one. A weight a program could
+ *  choose would make a single key worth as much as it liked. */
+export function voteClaim(args: unknown): { target: string; dir: 1 | -1 } | null {
+  const target = refTarget(args, 'votesOn')
+  if (!target) return null
+  const raw =
+    args instanceof Map
+      ? args.get('dir')
+      : args && typeof args === 'object' && !Array.isArray(args)
+        ? (args as Record<string, unknown>).dir
+        : undefined
+  if (raw !== 1 && raw !== -1) return null
+  return { target, dir: raw }
 }
 
 /** One signatory a document NAMES. A claim by whoever wrote the manifest --
@@ -142,6 +176,9 @@ export function declaredSigners(args: unknown, field = 'signers'): DeclaredSigne
   return out
 }
 
+/** The reference a manifest's args CLAIM, or null. Pure and shared by store()
+ *  and the header so the index and the UI can never disagree. Only a bare
+ *  64-hex string counts — anything else is just program data. */
 export function refTarget(args: unknown, rel = 'replyTo'): string | null {
   if (args instanceof Map) {
     const v = args.get(rel)
@@ -365,6 +402,22 @@ export class Library {
       CREATE INDEX IF NOT EXISTS idx_vouches_about ON vouches(about_scheme, about_key);
       CREATE INDEX IF NOT EXISTS idx_vouches_voucher ON vouches(voucher_scheme, voucher_key);
 
+      -- A vote on a THING (not on a key -- that is a vouch, and conflating the
+      -- two would make every upvote a one-hop trust edge). refs already records
+      -- that a vote points at something; this carries the direction refs has no
+      -- column for, and the created stamp that decides which of a voter's
+      -- votes is their current word.
+      CREATE TABLE IF NOT EXISTS votes (
+        envelope_hash TEXT PRIMARY KEY,
+        voter_scheme  TEXT NOT NULL,
+        voter_key     TEXT NOT NULL,
+        target_hash   TEXT NOT NULL,
+        dir           INTEGER NOT NULL,
+        created       INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_votes_target ON votes(target_hash);
+      CREATE INDEX IF NOT EXISTS idx_votes_voter ON votes(voter_scheme, voter_key);
+
       -- What YOU call a key. Local, and deliberately so: a petname is the one
       -- kind of name nobody else can influence -- an author may claim any name
       -- they like and may even prove an ENS name, but they cannot make you
@@ -493,16 +546,32 @@ export class Library {
    *  the in-memory store and is deliberately unreadable here. Never allowed to
    *  make the library unopenable: a bad manifest is skipped. */
   private backfillRefs(): void {
-    // v2: the pass now indexes `attests` as well as `replyTo`. A library that
-    // ran v1 has never looked for the new relation, so it must run again --
-    // otherwise attestations imported into an existing library are invisible.
-    if (this.metaGet('refs_backfill_v2')) return
+    // The pass runs again whenever INDEXED_RELS grows: a library that ran an
+    // earlier version has never looked for the new relations, so things it
+    // already holds would stay invisible to them. v2 added `attests`; v3 adds
+    // `votesOn` and `inGroup`.
+    if (this.metaGet('refs_backfill_v3')) return
     try {
-      const rows = this.db.prepare('SELECT envelope_hash, manifest_hash FROM things WHERE sealed = 0').all() as {
+      const rows = this.db
+        .prepare(
+          'SELECT envelope_hash, author_scheme, author_key, type, created, manifest_hash FROM things WHERE sealed = 0'
+        )
+        .all() as {
         envelope_hash: string
+        author_scheme: string
+        author_key: string
+        type: string
+        created: number
         manifest_hash: string
       }[]
       const insert = this.db.prepare('INSERT OR IGNORE INTO refs (envelope_hash, rel, target_hash) VALUES (?,?,?)')
+      // Votes carry a direction refs cannot hold, so the same pass rebuilds
+      // them too. Otherwise a vote admitted before this version existed would
+      // be indexed as pointing at something, with nobody able to say which way.
+      const insertVote = this.db.prepare(
+        `INSERT OR IGNORE INTO votes (envelope_hash, voter_scheme, voter_key, target_hash, dir, created)
+         VALUES (?,?,?,?,?,?)`
+      )
       this.db.transaction(() => {
         for (const r of rows) {
           const bytes = this.cas.readAll(r.manifest_hash)
@@ -513,6 +582,12 @@ export class Library {
               const t = refTarget(args, rel)
               if (t) insert.run(r.envelope_hash, rel, t)
             }
+            if (r.type === 'vote') {
+              const claim = voteClaim(args)
+              if (claim) {
+                insertVote.run(r.envelope_hash, r.author_scheme, r.author_key, claim.target, claim.dir, r.created)
+              }
+            }
           } catch {
             /* undecodable manifest — skip it, never fail the open */
           }
@@ -521,7 +596,7 @@ export class Library {
     } catch {
       /* backfill is best-effort; the library must still open */
     }
-    this.db.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)').run('refs_backfill_v2', '1')
+    this.db.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)').run('refs_backfill_v3', '1')
   }
 
   /** How many things in this library claim to reply to `targetHash`. */
@@ -684,6 +759,22 @@ export class Library {
         }
       }
 
+      // A vote: same shape as a vouch and for the same reason. The VOTER is
+      // the signer, taken from the envelope where it cannot be faked; what the
+      // vote is about, and which way, are args and therefore their claim.
+      if (result.manifest.type === 'vote') {
+        const claim = voteClaim(result.manifest.args)
+        if (claim) {
+          this.db
+            .prepare(
+              `INSERT OR REPLACE INTO votes
+                 (envelope_hash, voter_scheme, voter_key, target_hash, dir, created)
+               VALUES (?,?,?,?,?,?)`
+            )
+            .run(envelopeHash, env.author.s, authorKey, claim.target, claim.dir, env.created)
+        }
+      }
+
       // A vouch: the SIGNER is the voucher (from the envelope, so it cannot be
       // faked), the subject comes from the args (so it is their claim).
       if (result.manifest.type === 'vouch') {
@@ -732,7 +823,11 @@ export class Library {
       ? { rel: 'replyTo', target: query.replyTo }
       : query.attests
         ? { rel: 'attests', target: query.attests }
-        : null
+        : query.votesOn
+          ? { rel: 'votesOn', target: query.votesOn }
+          : query.inGroup
+            ? { rel: 'inGroup', target: query.inGroup }
+            : null
     if (refFilter) {
       join = ' JOIN refs r ON r.envelope_hash = t.envelope_hash'
       where.push('r.rel = ?', 'r.target_hash = ?')
@@ -769,6 +864,24 @@ export class Library {
          WHERE v.path = t.envelope_hash AND v.author_key = t.author_key
       )`
     )
+    // Fold the feed to what deserves its own row. Two rules, and both are
+    // scoped narrowly -- the co-signing collapse above is here because a first
+    // attempt at it quietly swallowed ordinary copies.
+    if (query.rollUp) {
+      // A vote is activity, not content. Forty votes on an article are forty
+      // things and the library still stores forty rows, but listing them would
+      // bury everything else -- which is the exact complaint this answers.
+      where.push(`t.type != 'vote'`)
+      // A reply belongs under the thing it answers. Scoped to targets actually
+      // HELD: a reply to something you do not have must still show, because
+      // what you have is the reply, and hiding it would hide the only copy.
+      where.push(
+        `NOT EXISTS (
+          SELECT 1 FROM refs rr JOIN things parent ON parent.envelope_hash = rr.target_hash
+           WHERE rr.envelope_hash = t.envelope_hash AND rr.rel = 'replyTo'
+        )`
+      )
+    }
     const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
     const limit = query.limit ?? 200
     const offset = query.offset ?? 0
@@ -782,7 +895,22 @@ export class Library {
          ${clause} ORDER BY t.received_at DESC, t.rowid DESC LIMIT ? OFFSET ?`
       )
       .all(...params, limit, offset) as Row[]
-    return rows.map(toThingRow)
+    const out = rows.map(toThingRow)
+    if (query.rollUp && out.length > 0) {
+      // Two whole-table queries for the whole page, rather than a walk per
+      // row. A feed of 200 rows would otherwise be 400 queries.
+      const replies = this.descendantCounts()
+      const votes = this.voteCounts()
+      for (const row of out) {
+        const v = votes.get(row.envelopeHash)
+        row.activity = {
+          replies: replies.get(row.envelopeHash) ?? 0,
+          up: v?.up ?? 0,
+          down: v?.down ?? 0
+        }
+      }
+    }
+    return out
   }
 
   /** Things this shell was seeding when it last ran, so it can resume. */
@@ -1098,6 +1226,181 @@ export class Library {
       frontier = next
     }
     return out
+  }
+
+  // ── Votes ──────────────────────────────────────────────────────────────────
+  // A vote is about a THING. A vouch is about a KEY. Keeping them apart is the
+  // whole sybil story: tribe() walks vouch edges, so an upvote that was a vouch
+  // would put every author you ever agreed with one hop inside your trust
+  // graph. Votes are free to manufacture and are counted as such; what makes a
+  // count mean anything is how much of it came from your tribe.
+
+  // A key that votes twice has only its latest vote counted, exactly as a
+  // voucher who vouches twice does: a signed thing cannot be unsaid, so
+  // changing your mind means publishing a later vote, and repeating yourself
+  // must not buy extra weight.
+  //
+  // Ordered by `created` and then by ROWID, which is not decoration. `created`
+  // is an author claim in whole SECONDS, and pressing the up arrow and then
+  // the down arrow happens well inside one of those -- with `created` alone
+  // the two votes tie and SQLite picks whichever it likes. The rowid breaks
+  // the tie by the only other fact available: the order they arrived HERE.
+  // That is a local observation rather than the author's word, which is
+  // exactly what makes it usable as a tiebreak.
+  private static readonly LATEST_VOTE = `
+    SELECT voter_scheme, voter_key, target_hash, dir, envelope_hash,
+           ROW_NUMBER() OVER (
+             PARTITION BY target_hash, voter_scheme, voter_key
+             ORDER BY created DESC, rowid DESC
+           ) AS rn
+      FROM votes`
+
+  /** Every voter's CURRENT word on a thing. */
+  votesOn(targetHash: string): { voterScheme: string; voterKey: string; dir: number }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT voter_scheme, voter_key, dir FROM (${Library.LATEST_VOTE} WHERE target_hash = ?)
+          WHERE rn = 1`
+      )
+      .all(targetHash) as { voter_scheme: string; voter_key: string; dir: number }[]
+    return rows.map((r) => ({ voterScheme: r.voter_scheme, voterKey: r.voter_key, dir: r.dir }))
+  }
+
+  /** The same, for many things at once, so a listing is one query rather than
+   *  one per row. */
+  votesOnMany(targetHashes: string[]): Map<string, { voterScheme: string; voterKey: string; dir: number }[]> {
+    const out = new Map<string, { voterScheme: string; voterKey: string; dir: number }[]>()
+    if (targetHashes.length === 0) return out
+    const holes = targetHashes.map(() => '?').join(',')
+    const rows = this.db
+      .prepare(
+        `SELECT target_hash, voter_scheme, voter_key, dir
+           FROM (${Library.LATEST_VOTE} WHERE target_hash IN (${holes}))
+          WHERE rn = 1`
+      )
+      .all(...targetHashes) as { target_hash: string; voter_scheme: string; voter_key: string; dir: number }[]
+    for (const r of rows) {
+      const list = out.get(r.target_hash) ?? []
+      list.push({ voterScheme: r.voter_scheme, voterKey: r.voter_key, dir: r.dir })
+      out.set(r.target_hash, list)
+    }
+    return out
+  }
+
+  /** Your own current vote on a thing, or null. */
+  myVote(scheme: string, key: string, targetHash: string): { dir: number; envelopeHash: string } | null {
+    const r = this.db
+      .prepare(
+        `SELECT envelope_hash, dir
+           FROM (${Library.LATEST_VOTE} WHERE target_hash = ? AND voter_scheme = ? AND voter_key = ?)
+          WHERE rn = 1`
+      )
+      .get(targetHash, scheme, key) as { envelope_hash: string; dir: number } | undefined
+    return r ? { dir: r.dir, envelopeHash: r.envelope_hash } : null
+  }
+
+  // ── Threads ────────────────────────────────────────────────────────────────
+
+  /** Everything replying to a thing, however deep, breadth-first.
+   *
+   *  Deliberately a frontier walk rather than a recursive CTE, and modelled on
+   *  tribe() for the same reason: replyTo is a free claim, so A replying to B
+   *  while B replies to A is not a corrupt database, it is Tuesday. A walk with
+   *  a `seen` set and two hard caps obviously terminates; a query that needs an
+   *  argument about why it terminates does not.
+   *
+   *  The shallowest place a thing appears wins, so a reply claiming two parents
+   *  is drawn once, nearest the root. */
+  thread(rootHash: string, maxDepth = 32, maxNodes = 500): { row: ThingRow; parent: string; depth: number }[] {
+    const out: { row: ThingRow; parent: string; depth: number }[] = []
+    const seen = new Set([rootHash])
+    let frontier = [rootHash]
+    for (let depth = 1; depth <= maxDepth && frontier.length > 0 && out.length < maxNodes; depth++) {
+      const next: string[] = []
+      for (const parent of frontier) {
+        for (const row of this.feed({ replyTo: parent, limit: maxNodes })) {
+          if (seen.has(row.envelopeHash)) continue
+          seen.add(row.envelopeHash)
+          out.push({ row, parent, depth })
+          next.push(row.envelopeHash)
+          if (out.length >= maxNodes) break
+        }
+        if (out.length >= maxNodes) break
+      }
+      frontier = next
+    }
+    return out
+  }
+
+  /** How many things reply to each of these, however deep: ONE query for the
+   *  whole feed rather than a walk per row.
+   *
+   *  Bounded by depth in the CTE itself, and UNION (not UNION ALL) so a cycle
+   *  cannot spin. A thing reachable by two paths is counted once, which is
+   *  what a reader means by "12 replies". */
+  descendantCounts(maxDepth = 32): Map<string, number> {
+    const rows = this.db
+      .prepare(
+        `WITH RECURSIVE sub(root, node, depth) AS (
+           SELECT target_hash, envelope_hash, 1 FROM refs WHERE rel = 'replyTo'
+           UNION
+           SELECT s.root, r.envelope_hash, s.depth + 1
+             FROM refs r JOIN sub s ON r.target_hash = s.node
+            WHERE r.rel = 'replyTo' AND s.depth < ?
+         )
+         SELECT root, COUNT(DISTINCT node) AS n FROM sub GROUP BY root`
+      )
+      .all(maxDepth) as { root: string; n: number }[]
+    return new Map(rows.map((r) => [r.root, r.n]))
+  }
+
+  /** How many votes point at each thing, in one query. Raw counts only -- what
+   *  makes them mean anything is the tribe split, which needs YOUR key and so
+   *  is computed above this layer. */
+  voteCounts(): Map<string, { up: number; down: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT target_hash, dir, COUNT(*) AS n
+           FROM (${Library.LATEST_VOTE}) WHERE rn = 1
+          GROUP BY target_hash, dir`
+      )
+      .all() as { target_hash: string; dir: number; n: number }[]
+    const out = new Map<string, { up: number; down: number }>()
+    for (const r of rows) {
+      const cur = out.get(r.target_hash) ?? { up: 0, down: 0 }
+      if (r.dir > 0) cur.up += r.n
+      else cur.down += r.n
+      out.set(r.target_hash, cur)
+    }
+    return out
+  }
+
+  // ── Forums ─────────────────────────────────────────────────────────────────
+  // A forum is a GROUP: a roster with roles, kept by whoever founded it and
+  // amended through its version chain. Its stable name is the root envelope
+  // hash of that chain -- which is exactly what `path` is -- so a post says
+  // `inGroup: <root>` and keeps pointing at the forum across every revision.
+
+  /** The current version of a group chain, given its root hash. Null if the
+   *  root is not held, or is not a group. */
+  groupCurrent(rootHash: string): ThingRow | null {
+    const root = this.get(rootHash)
+    if (!root || root.type !== 'group') return null
+    const history = this.chainHistory(root.authorKey, rootHash)
+    return history.length > 0 ? history[history.length - 1]! : root
+  }
+
+  /** Everything claiming to belong to a group, newest first. Claims: being
+   *  tagged into a forum is not the forum agreeing. */
+  forumPosts(rootHash: string, limit = 200): ThingRow[] {
+    return this.feed({ inGroup: rootHash, limit })
+  }
+
+  /** Attestations pointing at a thing, with their authors -- the raw material
+   *  for a moderation verdict. WHO counts as a moderator is not decided here:
+   *  that depends on the roster you hold, which is the caller's business. */
+  attestationsOn(targetHash: string): ThingRow[] {
+    return this.feed({ attests: targetHash, limit: 200 })
   }
 
   /** Your name for a key, or null. */

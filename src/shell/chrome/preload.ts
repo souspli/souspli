@@ -126,6 +126,30 @@ const shell = {
     ipcRenderer.invoke('shell:seed-stop', envelopeHash),
   seedStatus: (): Promise<{ envelopeHash: string; magnet: string; peers: number; bytes: number; type: string }[]> =>
     ipcRenderer.invoke('shell:seed-status'),
+  /** Votes. A vote is about a THING; saying you know a KEY is a vouch, and
+   *  the shell keeps them apart because it walks vouch edges to build your
+   *  tribe. Casting one signs immediately — the click was the intent. */
+  vote: (envelopeHash: string, dir: 1 | -1): Promise<Record<string, unknown>> =>
+    ipcRenderer.invoke('shell:vote', envelopeHash, dir),
+  votes: (envelopeHash: string): Promise<Record<string, number>> =>
+    ipcRenderer.invoke('shell:votes', envelopeHash),
+  /** The whole conversation under a thing, each entry with parent and depth. */
+  thread: (envelopeHash: string): Promise<{ rows: Record<string, unknown>[]; count: number }> =>
+    ipcRenderer.invoke('shell:thread', envelopeHash),
+  /** Forums: a forum is a group, so these read the groups you already hold. */
+  forums: (): Promise<Record<string, unknown>[]> => ipcRenderer.invoke('shell:forums'),
+  forum: (rootHash: string): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:forum', rootHash),
+  forumListing: (rootHash: string): Promise<{ rows: Record<string, unknown>[]; tribeEmpty: boolean }> =>
+    ipcRenderer.invoke('shell:forum-listing', rootHash),
+  newForumPost: (rootHash: string, starterKey?: string): Promise<{ id?: string; error?: string }> =>
+    ipcRenderer.invoke('shell:forum-post', rootHash, starterKey),
+  requestJoin: (rootHash: string): Promise<{ id?: string; error?: string }> =>
+    ipcRenderer.invoke('shell:request-join', rootHash),
+  newVerdict: (targetHash: string, rootHash: string, verdict: string): Promise<{ id?: string; error?: string }> =>
+    ipcRenderer.invoke('shell:new-verdict', targetHash, rootHash, verdict),
+  onOpenForums: (cb: () => void): void => {
+    ipcRenderer.on('shell:open-forums', () => cb())
+  },
   /** Relays: a way for a thing to reach someone who never asked for it.
    *  Nothing is connected to and nothing is posted unless the human says so. */
   relays: (): Promise<{

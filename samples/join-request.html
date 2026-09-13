@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>join request</title>
+<style>
+  body { margin: 0; font: 15px/1.55 system-ui, sans-serif; background: #1d2320; color: #d8d4c8;
+         display: flex; align-items: flex-start; justify-content: center; min-height: 100vh;
+         padding: 24px; box-sizing: border-box; }
+  .req { background: #262c28; border: 1px solid #39413b; border-left: 3px solid #8a8f6f; border-radius: 4px;
+         width: 32em; max-width: 100%; padding: 16px 18px; }
+  h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  .who { margin: 10px 0 0; color: #b9b2a2; }
+  .who.empty { color: #7d8a80; font-style: italic; }
+  .say { margin: 12px 0 0; white-space: pre-wrap; color: #cfc9bb; }
+  .on { margin: 14px 0 0; padding-top: 10px; border-top: 1px solid #39413b; font-size: 12px; color: #8a978d; }
+  .on code { font-family: ui-monospace, Menlo, monospace; color: #a9b8ae; }
+  .standing { margin: 12px 0 0; font-size: 12px; color: #8a978d; font-style: italic; }
+
+  label { display: block; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #8a978d;
+          margin: 14px 0 6px; }
+  input, textarea { font: inherit; width: 100%; box-sizing: border-box; background: #1f2521; color: #e6e2d6;
+                    border: 1px solid #3f4a43; border-radius: 4px; padding: 8px 10px; }
+  input.h { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+  textarea { min-height: 5em; resize: vertical; }
+  .hint { margin-top: 12px; font-size: 12px; color: #7d8a80; }
+</style>
+</head>
+<body>
+  <div class="req"><div id="app"></div></div>
+  <script>
+    'use strict';
+    // Asking to join a group.
+    //
+    // State: args {inGroup, calledMe, say}.
+    //
+    // This is a REQUEST and nothing more. Publishing one puts nobody on any
+    // roster: a roster is the group keeper's own signed thing, and the only
+    // way in is for them to publish a new version that names you. That is why
+    // there is no "accepted" field here for this program to set — it would be
+    // the applicant deciding their own application.
+    //
+    // `calledMe` is what you would like to be called on the roster. Like every
+    // name a thing carries, it is a claim by whoever signed it; the name that
+    // ends up on the roster is the keeper's to write.
+    var a = window.bridge.getArgs() || {};
+    var args = (a && typeof a.args === 'object' && a.args !== null) ? a.args : {};
+    var app = document.getElementById('app');
+
+    function str(v) { return typeof v === 'string' ? v : ''; }
+
+    function el(tag, cls, text) {
+      var e = document.createElement(tag);
+      if (cls) e.className = cls;
+      if (text !== undefined) e.textContent = text;
+      return e;
+    }
+
+    function shortHash(h) {
+      return h.length > 16 ? h.slice(0, 8) + '…' + h.slice(-6) : h;
+    }
+
+    function view() {
+      app.replaceChildren();
+      app.append(el('h1', null, 'Request to join'));
+
+      var called = str(args.calledMe);
+      app.append(el('p', called ? 'who' : 'who empty',
+        called ? 'Asking to be listed as “' + called + '”.' : 'No name given for the roster.'));
+
+      if (str(args.say)) app.append(el('p', 'say', args.say));
+
+      var g = str(args.inGroup);
+      var p = el('p', 'on');
+      if (g) {
+        p.append(document.createTextNode('to the group '));
+        p.append(el('code', null, shortHash(g)));
+      } else {
+        p.textContent = 'This request names no group.';
+      }
+      app.append(p);
+
+      app.append(el('p', 'standing',
+        'A request, not a membership. Only the group’s keeper can publish a roster that names you, and they have not done so by your asking.'));
+    }
+
+    function edit() {
+      app.replaceChildren();
+
+      app.append(el('label', null, 'what to call you'));
+      var n = el('input');
+      n.type = 'text';
+      n.value = str(args.calledMe);
+      n.placeholder = 'the name you would like on the roster';
+      n.addEventListener('input', function () { args.calledMe = n.value; emit(); });
+      app.append(n);
+
+      app.append(el('label', null, 'anything to say'));
+      var t = el('textarea');
+      t.value = str(args.say);
+      t.placeholder = 'why you want in, who knows you already — whatever helps them decide';
+      t.addEventListener('input', function () { args.say = t.value; emit(); });
+      app.append(t);
+
+      app.append(el('label', null, 'the group'));
+      var h = el('input', 'h');
+      h.type = 'text';
+      h.value = str(args.inGroup);
+      h.placeholder = 'the group’s root hash';
+      h.addEventListener('input', function () { args.inGroup = h.value.trim(); emit(); });
+      app.append(h);
+
+      app.append(el('p', 'hint',
+        'Press Request to join on the group itself and the shell fills the last box in. Publishing this asks; it does not admit you.'));
+    }
+
+    function emit() {
+      var out = {};
+      if (str(args.calledMe)) out.calledMe = str(args.calledMe);
+      if (str(args.say)) out.say = str(args.say);
+      if (str(args.inGroup)) out.inGroup = str(args.inGroup);
+      window.bridge.emit('draft', { type: 'join-request', args: out });
+    }
+
+    if (a.mode === 'edit') edit(); else view();
+  </script>
+</body>
+</html>

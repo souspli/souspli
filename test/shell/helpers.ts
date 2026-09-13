@@ -213,6 +213,18 @@ export interface ShellHandle {
   seedStart(envelopeHash: string): Promise<Record<string, unknown>>
   seedStop(envelopeHash: string): Promise<Record<string, unknown>>
   seedStatus(): Promise<Record<string, unknown>[]>
+  /** Votes: cast one, and read what the votes on a thing are worth. */
+  vote(envelopeHash: string, dir: 1 | -1): Promise<Record<string, unknown>>
+  votes(envelopeHash: string): Promise<Record<string, number>>
+  /** The whole conversation under a thing. */
+  thread(envelopeHash: string): Promise<{ rows: Record<string, unknown>[]; count: number }>
+  /** Forums: the groups you hold, one forum's facts, and its ranked posts. */
+  forums(): Promise<Record<string, unknown>[]>
+  forum(rootHash: string): Promise<Record<string, unknown>>
+  forumListing(rootHash: string): Promise<{ rows: Record<string, unknown>[]; tribeEmpty: boolean }>
+  newForumPost(rootHash: string, starterKey?: string): Promise<{ id?: string; error?: string }>
+  requestJoin(rootHash: string): Promise<{ id?: string; error?: string }>
+  newVerdict(targetHash: string, rootHash: string, verdict: string): Promise<{ id?: string; error?: string }>
   /** Relays: who we talk to, posting (the explicit act), and who offered us
    *  a thing — which is never the same question as who authored it. */
   relays(): Promise<{ relays: { url: string; state: string; received: number; refused: number }[]; since: number }>
@@ -505,6 +517,75 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
         const s = (electron.app as unknown as { __shell: { seedStatus: () => Record<string, unknown>[] } }).__shell
         return s.seedStatus() as never
       }),
+    vote: (envelopeHash: string, dir: 1 | -1) =>
+      app.evaluate(
+        async (electron, a) => {
+          const s = (
+            electron.app as unknown as {
+              __shell: { vote: (h: string, d: number) => Promise<Record<string, unknown>> }
+            }
+          ).__shell
+          return s.vote(a.h, a.d)
+        },
+        { h: envelopeHash, d: dir }
+      ),
+    votes: (envelopeHash: string) =>
+      app.evaluate(async (electron, h) => {
+        const s = (electron.app as unknown as { __shell: { votes: (h: string) => Record<string, number> } }).__shell
+        return s.votes(h) as never
+      }, envelopeHash),
+    thread: (envelopeHash: string) =>
+      app.evaluate(async (electron, h) => {
+        const s = (electron.app as unknown as { __shell: { thread: (h: string) => Record<string, unknown> } }).__shell
+        return s.thread(h) as never
+      }, envelopeHash),
+    forums: () =>
+      app.evaluate(async (electron) => {
+        const s = (electron.app as unknown as { __shell: { forums: () => Record<string, unknown>[] } }).__shell
+        return s.forums() as never
+      }),
+    forum: (rootHash: string) =>
+      app.evaluate(async (electron, h) => {
+        const s = (electron.app as unknown as { __shell: { forum: (h: string) => Record<string, unknown> } }).__shell
+        return s.forum(h)
+      }, rootHash),
+    forumListing: (rootHash: string) =>
+      app.evaluate(async (electron, h) => {
+        const s = (electron.app as unknown as { __shell: { forumListing: (h: string) => Record<string, unknown> } })
+          .__shell
+        return s.forumListing(h) as never
+      }, rootHash),
+    newForumPost: (rootHash: string, starterKey?: string) =>
+      app.evaluate(
+        async (electron, a) => {
+          const s = (
+            electron.app as unknown as {
+              __shell: { newForumPost: (h: string, k?: string) => { id?: string; error?: string } }
+            }
+          ).__shell
+          return s.newForumPost(a.h, a.k)
+        },
+        { h: rootHash, k: starterKey }
+      ),
+    requestJoin: (rootHash: string) =>
+      app.evaluate(async (electron, h) => {
+        const s = (
+          electron.app as unknown as { __shell: { requestJoin: (h: string) => { id?: string; error?: string } } }
+        ).__shell
+        return s.requestJoin(h)
+      }, rootHash),
+    newVerdict: (targetHash: string, rootHash: string, verdict: string) =>
+      app.evaluate(
+        async (electron, a) => {
+          const s = (
+            electron.app as unknown as {
+              __shell: { newVerdict: (h: string, g: string, v: string) => { id?: string; error?: string } }
+            }
+          ).__shell
+          return s.newVerdict(a.h, a.g, a.v)
+        },
+        { h: targetHash, g: rootHash, v: verdict }
+      ),
     relays: () =>
       app.evaluate(async (electron) => {
         const s = (electron.app as unknown as { __shell: { relays: () => Record<string, unknown> } }).__shell

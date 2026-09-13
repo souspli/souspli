@@ -375,6 +375,34 @@ body {
 .sh-sharing-head { display: flex; align-items: center; gap: var(--evm-space-2); margin-bottom: var(--evm-space-2); }
 .sh-sharing-head > .sh-hint { flex: 1; }
 
+/* Votes. The score and the tribe count sit side by side on purpose: they are
+   two different claims about the same thing, and a single merged number would
+   be exactly the ranking nobody can explain. */
+.sh-votes { display: inline-flex; align-items: center; gap: 2px; }
+.sh-vote-btn { padding: 2px 6px; line-height: 1; }
+.sh-vote-btn--cast { color: var(--evm-accent); border-color: var(--evm-accent); }
+.sh-vote-score { min-width: 2.2em; text-align: center; font-variant-numeric: tabular-nums;
+                 font-size: var(--evm-text-sm); color: var(--evm-text-1); }
+.sh-vote-tribe { font-size: var(--evm-text-sm); color: var(--evm-info); white-space: nowrap; }
+
+/* Forums. A forum is a group, so this is a view over things you already hold. */
+.sh-forums, .sh-forum { max-width: 46em; }
+.sh-forum-purpose { margin: 0 0 var(--evm-space-3); color: var(--evm-text-2); white-space: pre-wrap; }
+.sh-forum-name { font-weight: 600; color: var(--evm-text-1); }
+.sh-forum-row { border-top: 1px solid var(--evm-border); }
+.sh-forum-row:first-child { border-top: none; }
+.sh-forum-score { min-width: 2.4em; font-variant-numeric: tabular-nums; color: var(--evm-text-2);
+                  font-size: var(--evm-text-sm); }
+/* A hidden post is FOLDED, not gone: the row still exists, still names who
+   hid it, and still opens. */
+.sh-forum-folded { display: flex; align-items: center; gap: var(--evm-space-2);
+                   padding: var(--evm-space-2) var(--evm-space-3); }
+.sh-forum-folded > .sh-hint { flex: 1; font-style: italic; }
+
+/* One reply per row, indented by depth (capped, see renderer). */
+.sh-reply-item { border-left: 1px solid var(--evm-border); }
+.sh-feed-activity { color: var(--evm-text-2); }
+
 /* Relays. One relay per row, state first: whether it is connected is the
    only thing that decides if any of this is doing anything. */
 .sh-relays { max-width: 44em; }

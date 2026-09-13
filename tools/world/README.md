@@ -15,6 +15,7 @@ pnpm world open ada      # the real GUI, on Ada's library
 pnpm world live ada grace   # several instances at once
 pnpm world magnet        # seed on one instance, fetch it on another
 pnpm world relay         # post on one; receive it on another, unasked
+pnpm world forum         # the same forum, ranked in two libraries
 pnpm world reset         # delete world/
 ```
 
@@ -22,6 +23,13 @@ pnpm world reset         # delete world/
 instances, two real keys, two real libraries, and bytes actually moving between
 them. `relay` starts a local relay in-process by default, so it works offline;
 `--relay wss://…` points it at a real one.
+
+`forum` is the one to run if you only run one. It prints the same forum as two
+different accounts see it — identical bytes, different order, because each
+library weights the same votes by whose vouches reach the voter. In the seeded
+world Ada's top post is the one four strangers downranked, and the listicle
+they all upvoted sits last, because one person Ada actually vouched for voted
+against it.
 
 ## Why it is cheap
 

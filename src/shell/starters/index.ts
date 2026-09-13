@@ -5,11 +5,13 @@ import contractHtml from '../../../samples/contract.html?raw'
 import attestationHtml from '../../../samples/attestation.html?raw'
 import groupHtml from '../../../samples/group.html?raw'
 import inviteHtml from '../../../samples/invite.html?raw'
+import joinRequestHtml from '../../../samples/join-request.html?raw'
 import invoiceHtml from '../../../samples/invoice.html?raw'
 import memoHtml from '../../../samples/memo.html?raw'
 import nametagHtml from '../../../samples/nametag.html?raw'
 import posterHtml from '../../../samples/poster.html?raw'
 import todoHtml from '../../../samples/todo.html?raw'
+import voteHtml from '../../../samples/vote.html?raw'
 import vouchHtml from '../../../samples/vouch.html?raw'
 
 // ── Built-in starter programs ────────────────────────────────────────────────
@@ -110,6 +112,20 @@ export const STARTERS: readonly Starter[] = [
     label: 'Contract',
     description: 'A document several people sign — parties, witnesses, and their signatures.',
     html: contractHtml
+  },
+  {
+    key: 'starter:vote',
+    type: 'vote',
+    label: 'Vote',
+    description: 'One key, for or against one thing. Usually cast with ▲ ▼ rather than made here.',
+    html: voteHtml
+  },
+  {
+    key: 'starter:join-request',
+    type: 'join-request',
+    label: 'Request to join',
+    description: 'Ask a group’s keeper to put you on the roster. Asking is not joining.',
+    html: joinRequestHtml
   },
   {
     key: 'starter:vouch',
