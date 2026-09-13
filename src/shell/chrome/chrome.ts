@@ -29,6 +29,16 @@ interface ShellApi {
   seedStart(envelopeHash: string): Promise<{ magnet?: string; error?: string }>
   seedStop(envelopeHash: string): Promise<{ stopped: boolean }>
   seedStatus(): Promise<{ envelopeHash: string; magnet: string; peers: number; bytes: number; type: string }[]>
+  vote(envelopeHash: string, dir: 1 | -1): Promise<Record<string, unknown>>
+  votes(envelopeHash: string): Promise<Record<string, number>>
+  thread(envelopeHash: string): Promise<{ rows: Record<string, unknown>[]; count: number }>
+  forums(): Promise<Record<string, unknown>[]>
+  forum(rootHash: string): Promise<Record<string, unknown>>
+  forumListing(rootHash: string): Promise<{ rows: Record<string, unknown>[]; tribeEmpty: boolean }>
+  newForumPost(rootHash: string, starterKey?: string): Promise<{ id?: string; error?: string }>
+  requestJoin(rootHash: string): Promise<{ id?: string; error?: string }>
+  newVerdict(targetHash: string, rootHash: string, verdict: string): Promise<{ id?: string; error?: string }>
+  onOpenForums(cb: () => void): void
   relays(): Promise<{
     relays: { url: string; state: string; error: string | null; received: number; refused: number }[]
     since: number
@@ -107,6 +117,9 @@ interface ThingRow {
   /** Its place in the author's version chain, when it is in one. */
   path?: string | null
   seq?: number | null
+  /** Only on a rolled-up feed: what folded into this row — the whole reply
+   *  subtree, and the votes cast on it. */
+  activity?: { replies: number; up: number; down: number }
 }
 interface KnownTypeEntry {
   key: string
@@ -152,6 +165,13 @@ interface HeaderFacts {
   attests?: string | null
   attestsKnown?: boolean
   attestCount?: number
+  /** Which forum this claims to belong to, and whether you hold that group.
+   *  A claim like replyTo: a roster never consented to what is tagged into it. */
+  inGroup?: string | null
+  inGroupKnown?: boolean
+  /** What the votes on this are worth: the raw counts everyone sees, and the
+   *  part of them that came from inside your own tribe. Both, always. */
+  votes?: { up: number; down: number; score: number; tribeUp: number; tribeDown: number; tribeScore: number; mine: number } | null
   /** How far the author sits from you through your own vouches, or null for
    *  outside your tribe (and for a draft, which nobody has signed). */
   authorHops?: number | null
@@ -1091,7 +1111,21 @@ function thingItem(row: ThingRow): HTMLElement {
   })
   flags.append(del)
   line1.append(el('span', 'evm-badge evm-badge--neutral', row.type), author, flags)
-  item.append(line1, el('div', 'sh-feed-meta', fmtTime(row.receivedAt)))
+  const meta = el('div', 'sh-feed-meta', fmtTime(row.receivedAt))
+  // What folded into this row. Shown only when there IS any, so an ordinary
+  // thing reads exactly as it did before.
+  const act = row.activity
+  if (act && (act.replies > 0 || act.up > 0 || act.down > 0)) {
+    const bits: string[] = []
+    if (act.replies > 0) bits.push(act.replies === 1 ? '1 reply' : `${act.replies} replies`)
+    const votes = act.up + act.down
+    if (votes > 0) bits.push(votes === 1 ? '1 vote' : `${votes} votes`)
+    const badge = el('span', 'sh-feed-activity', bits.join(' · '))
+    badge.setAttribute('data-testid', 'feed-activity')
+    badge.setAttribute('data-replies', String(act.replies))
+    meta.append(el('span', undefined, ' · '), badge)
+  }
+  item.append(line1, meta)
   item.addEventListener('click', () => void openThing(row.envelopeHash))
   return item
 }
@@ -1149,7 +1183,10 @@ function feedFilter(): HTMLElement {
 async function refreshFeed(): Promise<void> {
   // "Mine" is a library-side author filter; with no identity yet (boot race)
   // fall back to everything rather than showing a misleading empty list.
-  const query = feedScope === 'mine' && myAuthorKey ? { author: myAuthorKey } : {}
+  // Rolled up: a reply belongs under the thing it answers and a vote is
+  // activity rather than content. Without this a busy forum thread would push
+  // a memo addressed to you off the bottom of the list.
+  const query = feedScope === 'mine' && myAuthorKey ? { author: myAuthorKey, rollUp: true } : { rollUp: true }
   const [drafts, rows] = await Promise.all([shell.drafts(), shell.feed(query)])
   feedPane.replaceChildren()
   // Drafts are yours by definition and are never published, so the Mine/All
@@ -2114,9 +2151,282 @@ async function openHistoryModal(authorKey: string, path: string, currentHash: st
   document.body.append(trackOverlay(overlay))
 }
 
-/** Things in THIS library that claim to reply to `target`. */
+// ── Forums ───────────────────────────────────────────────────────────────────
+// A forum is a GROUP: a roster with roles, kept by whoever founded it. There is
+// no forum thing type and there never was one -- if a forum had needed new
+// primitives, the primitives would have been wrong.
+//
+// Two sentences this UI exists to say, and must never stop saying:
+//   · a ranking you cannot explain is worse than none, so the raw count and
+//     the tribe count both appear, next to each other;
+//   · a moderator hides nothing from you. A verdict folds a post behind a line
+//     naming who and why, with the post one click away, because disagreeing
+//     has to stay possible.
+
+/** Every group you hold, as somewhere people post. */
+async function openForumsModal(): Promise<void> {
+  const overlay = el('div', 'evm-modal-overlay')
+  const modal = el('div', 'evm-modal sh-forums')
+  modal.setAttribute('data-testid', 'forums-modal')
+  const header = el('div', 'evm-modal-header')
+  header.append(el('span', 'evm-modal-title', 'Forums'))
+  const body = el('div', 'evm-modal-body')
+  body.append(
+    el(
+      'p',
+      'sh-hint',
+      'A forum is a group you hold: its roster says who keeps it and who moderates. Anyone can post into one — being tagged into a group is the author’s claim, never the roster agreeing.'
+    )
+  )
+
+  const list = el('div')
+  list.setAttribute('data-testid', 'forums-list')
+  body.append(list)
+
+  const paint = (forums: Record<string, unknown>[]): void => {
+    list.replaceChildren()
+    list.setAttribute('data-count', String(forums.length))
+    if (forums.length === 0) {
+      const none = el('p', 'sh-hint', 'No groups in your library yet. Make one with New → Group.')
+      none.setAttribute('data-testid', 'forums-empty')
+      list.append(none)
+      return
+    }
+    for (const f of forums) {
+      const item = el('button', 'sh-feed-item')
+      item.setAttribute('data-testid', 'forum-item')
+      item.setAttribute('data-root', String(f.root))
+      const line = el('div', 'sh-feed-line')
+      line.append(el('span', 'sh-forum-name', String(f.name || 'unnamed group')))
+      const flags = el('span', 'sh-feed-flags')
+      if (f.iAmModerator) flags.append(el('span', 'evm-badge evm-badge--info', 'you moderate'))
+      else if (f.iAmMember) flags.append(el('span', 'evm-badge evm-badge--neutral', 'you are listed'))
+      line.append(flags)
+      item.append(
+        line,
+        el(
+          'div',
+          'sh-feed-meta',
+          `${f.posts === 1 ? '1 post' : `${String(f.posts)} posts`} · ${
+            f.members === 1 ? '1 on the roster' : `${String(f.members)} on the roster`
+          }`
+        )
+      )
+      item.addEventListener('click', () => {
+        overlay.remove()
+        void openForumModal(String(f.root))
+      })
+      list.append(item)
+    }
+  }
+
+  const footer = el('div', 'evm-modal-footer')
+  const close = el('button', 'evm-btn evm-btn--ghost', 'Close')
+  close.setAttribute('data-testid', 'forums-close')
+  close.addEventListener('click', () => overlay.remove())
+  footer.append(close)
+  modal.append(header, body, footer)
+  overlay.append(modal)
+  document.body.append(trackOverlay(overlay))
+  paint(await shell.forums().catch(() => []))
+}
+
+/** One forum: its posts ranked, its roster, and what you can do here. */
+async function openForumModal(rootHash: string): Promise<void> {
+  const overlay = el('div', 'evm-modal-overlay')
+  const modal = el('div', 'evm-modal sh-forum')
+  modal.setAttribute('data-testid', 'forum-modal')
+  modal.setAttribute('data-root', rootHash)
+  const header = el('div', 'evm-modal-header')
+  const title = el('span', 'evm-modal-title', 'Forum')
+  header.append(title)
+  const body = el('div', 'evm-modal-body')
+  const footer = el('div', 'evm-modal-footer')
+
+  const facts: Record<string, unknown> = await shell
+    .forum(rootHash)
+    .catch(() => ({ error: 'could not read that group' }))
+  if (facts.error) {
+    body.append(el('div', 'evm-empty', String(facts.error)))
+  } else {
+    title.textContent = String(facts.name || 'Forum')
+    if (facts.purpose) body.append(el('p', 'sh-forum-purpose', String(facts.purpose)))
+
+    const mods = facts.moderators as { key: string; name: string }[]
+    body.append(
+      el(
+        'p',
+        'sh-hint',
+        mods.length === 0
+          ? 'This roster names no moderators, so nothing here is moderated for you.'
+          : `Moderated by ${mods.map((m) => m.name || short(m.key, 6)).join(', ')} — because the roster YOU hold says so. Hold a different revision and that changes.`
+      )
+    )
+
+    const listing = await shell.forumListing(rootHash).catch(() => ({ rows: [], tribeEmpty: true }))
+    // The warning that must never be quiet. With no vouches of your own every
+    // tribe score is zero and the order degrades to raw popularity -- which is
+    // precisely the ranking anyone can manufacture.
+    if (listing.tribeEmpty) {
+      const warn = el(
+        'p',
+        'sh-share-warn',
+        'You have vouched for nobody, so these are ordered by raw vote count — the kind anyone can manufacture with a thousand throwaway keys. Vouch for someone you actually know and the order starts meaning something.'
+      )
+      warn.setAttribute('data-testid', 'forum-no-tribe')
+      body.append(warn)
+    }
+
+    const posts = el('div')
+    posts.setAttribute('data-testid', 'forum-posts')
+    posts.setAttribute('data-count', String(listing.rows.length))
+    if (listing.rows.length === 0) posts.append(el('div', 'evm-empty', 'Nothing posted here yet.'))
+    for (const row of listing.rows) posts.append(forumPostRow(row, rootHash, overlay))
+    body.append(posts)
+
+    if (facts.pending && (facts.pending as unknown[]).length > 0) {
+      body.append(el('h3', 'sh-transfers-h', 'Asking to join'))
+      body.append(
+        el(
+          'p',
+          'sh-hint',
+          facts.keeperIsMe
+            ? 'Publish a new version of the group naming them — that, and only that, puts somebody on a roster.'
+            : 'Only the keeper can admit them, by publishing a new version of the group.'
+        )
+      )
+      const pend = el('div')
+      pend.setAttribute('data-testid', 'forum-pending')
+      pend.setAttribute('data-count', String((facts.pending as unknown[]).length))
+      for (const p of facts.pending as { envelopeHash: string; authorKey: string; petname: string | null }[]) {
+        const item = el('button', 'sh-feed-item')
+        item.setAttribute('data-testid', 'forum-pending-item')
+        item.append(
+          el('div', 'sh-feed-line', p.petname ?? short(p.authorKey, 8)),
+          el('div', 'sh-feed-meta', 'asked to be listed')
+        )
+        item.addEventListener('click', () => {
+          overlay.remove()
+          void openThing(p.envelopeHash)
+        })
+        pend.append(item)
+      }
+      body.append(pend)
+    }
+
+    const write = el('button', 'evm-btn evm-btn--primary evm-btn--sm', 'Write a post')
+    write.setAttribute('data-testid', 'forum-write')
+    write.addEventListener('click', async () => {
+      const r = await shell.newForumPost(rootHash)
+      if (!r.id) return showText(`Could not start a post: ${String(r.error ?? 'unknown')}`, 'danger')
+      overlay.remove()
+      await openThing(r.id)
+    })
+    footer.append(write)
+
+    if (!facts.iAmMember) {
+      const join = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Request to join')
+      join.setAttribute('data-testid', 'forum-join')
+      join.title = 'Asking is not joining: only the keeper can publish a roster that names you.'
+      join.addEventListener('click', async () => {
+        const r = await shell.requestJoin(rootHash)
+        if (!r.id) return showText(`Could not start a request: ${String(r.error ?? 'unknown')}`, 'danger')
+        overlay.remove()
+        await openThing(r.id)
+      })
+      footer.append(join)
+    }
+  }
+
+  const close = el('button', 'evm-btn evm-btn--ghost', 'Close')
+  close.setAttribute('data-testid', 'forum-close')
+  close.addEventListener('click', () => overlay.remove())
+  footer.append(close)
+  modal.append(header, body, footer)
+  overlay.append(modal)
+  document.body.append(trackOverlay(overlay))
+}
+
+/** One ranked post. A hidden one is FOLDED, never dropped: the line says who
+ *  hid it and why, and the post is still one press away. */
+function forumPostRow(row: Record<string, unknown>, rootHash: string, overlay: HTMLElement): HTMLElement {
+  const wrap = el('div', 'sh-forum-row')
+  wrap.setAttribute('data-envelope-hash', String(row.envelopeHash))
+  const verdict = row.verdict as { verdict: string; byName: string; by: string; why: string } | null
+  const hidden = verdict?.verdict === 'hide'
+
+  if (hidden) {
+    const fold = el('div', 'sh-forum-folded')
+    fold.setAttribute('data-testid', 'forum-hidden')
+    const who = verdict.byName || short(verdict.by, 6)
+    fold.append(
+      el('span', 'sh-hint', verdict.why ? `Hidden by ${who} — ${verdict.why}` : `Hidden by ${who}`)
+    )
+    const anyway = el('button', 'evm-btn evm-btn--ghost evm-btn--sm', 'Show anyway')
+    anyway.setAttribute('data-testid', 'forum-show-anyway')
+    anyway.addEventListener('click', () => {
+      fold.remove()
+      wrap.append(forumPostBody(row, rootHash, overlay, verdict))
+    })
+    fold.append(anyway)
+    wrap.append(fold)
+    return wrap
+  }
+  wrap.append(forumPostBody(row, rootHash, overlay, verdict))
+  return wrap
+}
+
+function forumPostBody(
+  row: Record<string, unknown>,
+  rootHash: string,
+  overlay: HTMLElement,
+  verdict: { verdict: string; byName: string; by: string; why: string } | null
+): HTMLElement {
+  const item = el('button', 'sh-feed-item')
+  item.setAttribute('data-testid', 'forum-post')
+  item.setAttribute('data-envelope-hash', String(row.envelopeHash))
+  const line = el('div', 'sh-feed-line')
+  const v = row.votes as { score: number; tribeScore: number; up: number; down: number; tribeUp: number; tribeDown: number }
+  const score = el('span', 'sh-forum-score', v.score > 0 ? `+${v.score}` : String(v.score))
+  score.setAttribute('data-testid', 'forum-score')
+  score.setAttribute('data-tribe', String(v.tribeScore))
+  // The number that decided the order, beside the number everyone sees.
+  score.title = voteTitle(v)
+  line.append(score)
+  line.append(el('span', 'evm-badge evm-badge--neutral', String(row.type)))
+  line.append(
+    el(
+      'span',
+      'sh-feed-author evm-address evm-address--muted',
+      authorLabel(row as unknown as ThingRow).text
+    )
+  )
+  const flags = el('span', 'sh-feed-flags')
+  if (v.tribeUp + v.tribeDown > 0) {
+    const badge = el('span', 'evm-badge evm-badge--info', `${v.tribeUp + v.tribeDown} yours`)
+    badge.setAttribute('data-testid', 'forum-tribe-votes')
+    flags.append(badge)
+  }
+  if (verdict?.verdict === 'endorse') flags.append(el('span', 'evm-badge evm-badge--success', 'endorsed'))
+  line.append(flags)
+  const replies = Number(row.replies ?? 0)
+  item.append(line, el('div', 'sh-feed-meta', `${replies === 1 ? '1 reply' : `${replies} replies`}`))
+  item.addEventListener('click', () => {
+    overlay.remove()
+    void openThing(String(row.envelopeHash))
+  })
+  void rootHash
+  return item
+}
+
+/** The whole conversation under a thing, as a tree.
+ *
+ *  Threading is `replyTo` followed as deep as it goes — no new relation, just
+ *  the one that was already there read recursively. Every level is still a
+ *  CLAIM: nothing binds a reply to the thing it answers, and a reply whose
+ *  target you do not hold is the commonest shape of that. */
 async function openRepliesModal(target: string): Promise<void> {
-  const { rows } = await shell.replies(target)
+  const { rows } = await shell.thread(target)
   const overlay = el('div', 'evm-modal-overlay')
   const modal = el('div', 'evm-modal')
   modal.setAttribute('data-testid', 'replies-modal')
@@ -2127,22 +2437,29 @@ async function openRepliesModal(target: string): Promise<void> {
     el(
       'p',
       'sh-hint',
-      'Things in your library that claim to reply to this. A reply is the commenter’s claim — like a timestamp, nothing binds it to this thing or its author.'
+      'Things in your library that claim to reply to this, and to each other. A reply is the commenter’s claim — like a timestamp, nothing binds it to this thing or its author.'
     )
   )
   if (rows.length === 0) body.append(el('div', 'evm-empty', 'Nothing in your library replies to this.'))
-  for (const row of rows) {
-    const item = el('button', 'sh-feed-item')
+  for (const entry of rows) {
+    const row = entry as unknown as ThingRow & {
+      depth: number
+      votes: { score: number; tribeScore: number; up: number; down: number; tribeUp: number; tribeDown: number }
+    }
+    const item = el('button', 'sh-feed-item sh-reply-item')
     item.setAttribute('data-testid', 'reply-item')
     item.setAttribute('data-envelope-hash', row.envelopeHash)
+    item.setAttribute('data-depth', String(row.depth))
+    // Indent by depth, capped: a thread 30 deep must stay readable rather than
+    // walking off the right edge of the pane.
+    item.style.marginLeft = `${Math.min(row.depth - 1, 8) * 14}px`
     const line = el('div', 'sh-feed-line')
+    const score = el('span', 'sh-forum-score', row.votes.score > 0 ? `+${row.votes.score}` : String(row.votes.score))
+    score.title = voteTitle(row.votes)
     line.append(
+      score,
       el('span', 'evm-badge evm-badge--neutral', row.type),
-      el(
-        'span',
-        'sh-feed-author evm-address evm-address--muted',
-        authorLabel(row).text
-      ),
+      el('span', 'sh-feed-author evm-address evm-address--muted', authorLabel(row).text),
       el('span', 'sh-feed-flags')
     )
     item.append(line, el('div', 'sh-feed-meta', fmtTime(row.receivedAt)))
@@ -2160,6 +2477,80 @@ async function openRepliesModal(target: string): Promise<void> {
   modal.append(header, body, footer)
   overlay.append(modal)
   document.body.append(trackOverlay(overlay))
+}
+
+/** "12 · 3 yours" — the raw count, and how much of it came from your tribe.
+ *
+ *  Both numbers, always. The raw one is what everyone sees and is free to
+ *  manufacture: a thousand keys cost nothing. The second cannot be forged
+ *  without first getting inside your own vouches, and it is the only reason
+ *  any of this means anything. Showing one score would hide which was which. */
+function voteTitle(v: { up: number; down: number; tribeUp: number; tribeDown: number }): string {
+  const total = v.up + v.down
+  const tribe = v.tribeUp + v.tribeDown
+  if (total === 0) return 'Nobody has voted on this.'
+  const plural = total === 1 ? '1 vote' : `${total} votes`
+  return tribe === 0
+    ? `${plural}, none from anyone your vouches reach. A raw count is free to manufacture.`
+    : `${plural}, ${tribe} from people you reached through your own vouches.`
+}
+
+/** ▲ score ▼ — the vote control, in chrome pixels the thing cannot reach.
+ *
+ *  A press signs a vote immediately. That is not a hole in the confirm rule:
+ *  the dialog exists because a PROGRAM asked to publish in your name, and this
+ *  came from a control you pressed, on a thing on your screen. */
+function voteControl(envelopeHash: string, facts: NonNullable<HeaderFacts['votes']>): HTMLElement {
+  const wrap = el('span', 'sh-votes')
+  wrap.setAttribute('data-testid', 'header-votes')
+  wrap.setAttribute('data-envelope-hash', envelopeHash)
+
+  const up = el('button', 'evm-btn evm-btn--ghost evm-btn--sm sh-vote-btn', '▲') as HTMLButtonElement
+  const down = el('button', 'evm-btn evm-btn--ghost evm-btn--sm sh-vote-btn', '▼') as HTMLButtonElement
+  up.setAttribute('data-testid', 'vote-up')
+  down.setAttribute('data-testid', 'vote-down')
+  const score = el('span', 'sh-vote-score')
+  score.setAttribute('data-testid', 'vote-score')
+  const tribe = el('span', 'sh-vote-tribe')
+  tribe.setAttribute('data-testid', 'vote-tribe')
+
+  const paint = (v: NonNullable<HeaderFacts['votes']>): void => {
+    score.textContent = v.score > 0 ? `+${v.score}` : String(v.score)
+    // The tribe number sits beside the score rather than inside it: it is a
+    // different claim about the same thing, and merging them into one number
+    // would be exactly the unexplainable ranking this is trying to avoid.
+    const t = v.tribeUp + v.tribeDown
+    tribe.textContent = t === 0 ? '' : `${t} yours`
+    wrap.setAttribute('data-score', String(v.score))
+    wrap.setAttribute('data-tribe', String(v.tribeScore))
+    wrap.setAttribute('data-mine', String(v.mine))
+    up.classList.toggle('sh-vote-btn--cast', v.mine === 1)
+    down.classList.toggle('sh-vote-btn--cast', v.mine === -1)
+    up.disabled = false
+    down.disabled = false
+    wrap.title = voteTitle(v)
+  }
+
+  const cast = async (dir: 1 | -1): Promise<void> => {
+    up.disabled = true
+    down.disabled = true
+    const r = await shell.vote(envelopeHash, dir)
+    if (r.error) {
+      // "already voted that way" is the common one and is not a failure worth
+      // a red banner -- the control just goes back to showing the truth.
+      showText(String(r.error), 'neutral')
+      paint(await (shell.votes(envelopeHash) as Promise<NonNullable<HeaderFacts['votes']>>))
+      return
+    }
+    paint(r as unknown as NonNullable<HeaderFacts['votes']>)
+    await refreshFeed()
+  }
+  up.addEventListener('click', () => void cast(1))
+  down.addEventListener('click', () => void cast(-1))
+
+  paint(facts)
+  wrap.append(up, score, tribe, down)
+  return wrap
 }
 
 // ── Per-thing trust header ───────────────────────────────────────────────────
@@ -2450,6 +2841,24 @@ function renderHeader(h: HeaderFacts | null): void {
     replyBits.push(at)
   }
 
+  // Voting, and which forum this is in. Both belong beside the reply controls:
+  // they are things you DO to a thing, not facts about its signature.
+  if (!h.draft && h.votes) replyBits.push(voteControl(h.envelopeHash, h.votes))
+  if (h.inGroup) {
+    const known = h.inGroupKnown === true
+    const chip = el('span', `sh-replyto${known ? ' sh-replyto--known' : ''}`, `in ${short(h.inGroup, 6)}`)
+    chip.setAttribute('data-testid', 'header-ingroup')
+    chip.setAttribute('data-known', known ? '1' : '0')
+    chip.title = known
+      ? `${h.inGroup} — click to open the forum. Being tagged into a group is the author’s claim; the roster never agreed to it.`
+      : `${h.inGroup} — you do not hold that group, so nobody moderates or ranks this for you`
+    if (known) {
+      chip.setAttribute('role', 'button')
+      chip.addEventListener('click', () => void openForumModal(h.inGroup!))
+    }
+    replyBits.push(chip)
+  }
+
   // How this thing REACHED you, when it came off a relay. Deliberately its own
   // chip, next to the author and never merged with them: whoever posted a
   // thing to a relay is a messenger, and anyone may relay anyone. The author
@@ -2626,6 +3035,8 @@ function bytesToBase64(bytes: Uint8Array): string {
    *  wording for exactly that case is the point of the window. */
   paintTransfers: (state: TransferState) => transfersPainter?.(state),
   openRelays: openRelaysModal,
+  openForums: openForumsModal,
+  openForum: openForumModal,
   openShare: openShareModal
 }
 
@@ -2678,6 +3089,7 @@ shell.onPublishResult((o) => {
 })
 shell.onOpenSharing(() => openTransfersModal())
 shell.onOpenRelays(() => openRelaysModal())
+shell.onOpenForums(() => void openForumsModal())
 // Pushed while anything is in flight; ignored when the window is closed.
 shell.onTransfers((state) => transfersPainter?.(state))
 shell.onOpenPeople(() => openPeopleModal())
