@@ -2029,9 +2029,13 @@ app.whenReady().then(async () => {
   /** A thing off a relay. Untrusted exactly like a file or a URL: the bytes go
    *  through admission and nothing the relay said decides anything. */
   async function onRelayThing(ev: ParsedThingEvent, url: string): Promise<void> {
-    // The cursor advances on every event that PARSED, not only on the ones we
-    // kept: a duplicate or a thing we refuse is still history read, and leaving
-    // the cursor behind would make every reconnect re-read it.
+    await handleRelayThing(ev, url)
+    // The cursor moves only once the event has been fully DEALT WITH -- kept,
+    // refused, or deliberately skipped. Moving it up front (when the event
+    // merely parsed) loses a thing whose ingest is still in flight when the
+    // app quits: the write never lands, the cursor is already past it, and no
+    // reconnect ever asks for it again. An exception leaves the cursor where
+    // it was, so the event is re-read rather than silently dropped.
     //
     // created_at is the POSTER's claim, so it is clamped. An event dated in the
     // year 3000 would otherwise push the cursor past everything real and make
@@ -2040,6 +2044,12 @@ app.whenReady().then(async () => {
     if (ev.event.created_at > library.cursor(SUB_ALL) && ev.event.created_at <= notFuture) {
       library.setCursor(SUB_ALL, ev.event.created_at)
     }
+  }
+
+  /** One event, from parsed to stored. Separate from the cursor above so that
+   *  every way of being done with an event -- including the early returns --
+   *  advances it exactly once, and only after the work is actually done. */
+  async function handleRelayThing(ev: ParsedThingEvent, url: string): Promise<void> {
     // A pointer rather than an inline bundle: fetching those is the next slice,
     // so record nothing rather than pretending to have it.
     if (!ev.bundle) return

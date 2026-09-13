@@ -309,8 +309,14 @@ test('the relay list and the read cursor survive a restart', async () => {
         const { outcome } = await alice.compose(NAMETAG.toString('base64'), 'nametag')
         expect((await alice.postToRelays(outcome.envelopeHash as string)).posted).toBe(1)
 
-        await expect.poll(async () => (await bob.relays()).since, { timeout: 15_000 }).toBeGreaterThan(0)
+        // Wait for the THING, not for the cursor. The cursor is the shell's
+        // record of how far it has read; the arrival is what this test is
+        // about, and only one of the two means the library write has landed.
+        await expect
+          .poll(async () => (await bob.feed({ type: 'nametag' })).length, { timeout: 15_000 })
+          .toBe(1)
         since = (await bob.relays()).since
+        expect(since, 'reading an event moved the cursor').toBeGreaterThan(0)
       } finally {
         await bob.close()
       }
