@@ -213,6 +213,15 @@ export interface ShellHandle {
   seedStart(envelopeHash: string): Promise<Record<string, unknown>>
   seedStop(envelopeHash: string): Promise<Record<string, unknown>>
   seedStatus(): Promise<Record<string, unknown>[]>
+  /** Relays: who we talk to, posting (the explicit act), and who offered us
+   *  a thing — which is never the same question as who authored it. */
+  relays(): Promise<{ relays: { url: string; state: string; received: number; refused: number }[]; since: number }>
+  addRelay(url: string): Promise<Record<string, unknown>>
+  removeRelay(url: string): Promise<Record<string, unknown>>
+  postToRelays(envelopeHash: string): Promise<Record<string, unknown>>
+  relayArrivals(
+    envelopeHash: string
+  ): Promise<{ relayUrl: string; poster: string; selfPosted: boolean; at: number }[]>
   /** Ingest raw bundle bytes (admit + store in the library). */
   ingest(bytes: Uint8Array): Promise<Record<string, unknown>>
   /** Fetch a locator (file:/bundle:/magnet:) then admit it. */
@@ -496,6 +505,38 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
         const s = (electron.app as unknown as { __shell: { seedStatus: () => Record<string, unknown>[] } }).__shell
         return s.seedStatus() as never
       }),
+    relays: () =>
+      app.evaluate(async (electron) => {
+        const s = (electron.app as unknown as { __shell: { relays: () => Record<string, unknown> } }).__shell
+        return s.relays() as never
+      }),
+    addRelay: (url: string) =>
+      app.evaluate(async (electron, u) => {
+        const s = (electron.app as unknown as { __shell: { addRelay: (u: string) => Record<string, unknown> } }).__shell
+        return s.addRelay(u)
+      }, url),
+    removeRelay: (url: string) =>
+      app.evaluate(async (electron, u) => {
+        const s = (electron.app as unknown as { __shell: { removeRelay: (u: string) => Record<string, unknown> } })
+          .__shell
+        return s.removeRelay(u)
+      }, url),
+    postToRelays: (envelopeHash: string) =>
+      app.evaluate(async (electron, h) => {
+        const s = (
+          electron.app as unknown as { __shell: { postToRelays: (h: string) => Promise<Record<string, unknown>> } }
+        ).__shell
+        return s.postToRelays(h)
+      }, envelopeHash),
+    relayArrivals: (envelopeHash: string) =>
+      app.evaluate(async (electron, h) => {
+        const s = (
+          electron.app as unknown as {
+            __shell: { relayArrivals: (h: string) => { relayUrl: string; poster: string; selfPosted: boolean; at: number }[] }
+          }
+        ).__shell
+        return s.relayArrivals(h) as never
+      }, envelopeHash),
     exportBase64: (envelopeHash: string) =>
       app.evaluate(async (electron, h) => {
         const s = (

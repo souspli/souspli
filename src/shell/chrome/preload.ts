@@ -126,6 +126,24 @@ const shell = {
     ipcRenderer.invoke('shell:seed-stop', envelopeHash),
   seedStatus: (): Promise<{ envelopeHash: string; magnet: string; peers: number; bytes: number; type: string }[]> =>
     ipcRenderer.invoke('shell:seed-status'),
+  /** Relays: a way for a thing to reach someone who never asked for it.
+   *  Nothing is connected to and nothing is posted unless the human says so. */
+  relays: (): Promise<{
+    relays: { url: string; state: string; error: string | null; received: number; refused: number }[]
+    since: number
+  }> => ipcRenderer.invoke('shell:relays'),
+  addRelay: (url: string): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:relay-add', url),
+  removeRelay: (url: string): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:relay-remove', url),
+  postToRelays: (envelopeHash: string): Promise<Record<string, unknown>> =>
+    ipcRenderer.invoke('shell:relay-post', envelopeHash),
+  /** Who OFFERED us a thing on a relay — never who authored it. */
+  relayArrivals: (
+    envelopeHash: string
+  ): Promise<{ relayUrl: string; poster: string; selfPosted: boolean; at: number }[]> =>
+    ipcRenderer.invoke('shell:relay-arrivals', envelopeHash),
+  onOpenRelays: (cb: () => void): void => {
+    ipcRenderer.on('shell:open-relays', () => cb())
+  },
   /** Delete a thing from the library (index row + blob GC + seed removal). */
   deleteThing: (envelopeHash: string): Promise<{ deleted: boolean }> => ipcRenderer.invoke('shell:delete', envelopeHash),
   /** Announce a chrome modal overlay opening (+1) / closing (-1) so main can

@@ -21,6 +21,8 @@ import { STARTERS, starterByKey, starterBytes } from './starters/index.js'
 import { mountThing, type MountedThing } from './mount/index.js'
 import { TransportService, FileTransport, HttpTransport, SeedTransport } from './transport/index.js'
 import { TorrentService, displayNameOf, infoHashOf } from './torrent/index.js'
+import { NostrService, buildThingEvent, MAX_INLINE_BUNDLE, TAG, type ParsedThingEvent } from './nostr/index.js'
+import { NOSTR_ENC_SCHEME } from './nostr/event.js'
 import { NamingService, DirectResolver, EnsResolver, NostrResolver, type EnsClient } from './naming/index.js'
 import { createMockEnsClient } from './naming/mock-ens.js'
 import { createViemEnsClient } from './naming/ens-viem.js'
@@ -243,6 +245,12 @@ function summarize(r: AdmissionResult): Record<string, unknown> {
       type: r.manifest.type,
       envelopeHash: hex(r.envelopeHash),
       author: { scheme: r.envelope.author.s, k: hex(r.envelope.author.k) },
+      // The encryption key the author BOUND to this thing, if any (§5.2). It is
+      // covered by the signature, so it is the author saying which other key
+      // speaks for them -- which is what makes "did this person really post
+      // this to the relay?" a question with an answer.
+      encScheme: r.envelope.author.e ?? null,
+      encKey: r.envelope.author.ek ? hex(r.envelope.author.ek) : null,
       attachments: [...r.attachments.keys()]
     }
   }
@@ -318,6 +326,16 @@ interface ShellSurface {
   seedStart?: (envelopeHash: string) => Promise<Record<string, unknown>>
   seedStop?: (envelopeHash: string) => Record<string, unknown>
   seedStatus?: () => Record<string, unknown>[]
+  /** Relay connections and how far the subscription has read. */
+  relays?: () => Record<string, unknown>
+  addRelay?: (url: string) => Record<string, unknown>
+  removeRelay?: (url: string) => Record<string, unknown>
+  /** Post a thing to every connected relay — the explicit act, never implicit. */
+  postToRelays?: (envelopeHash: string) => Promise<Record<string, unknown>>
+  /** Who OFFERED us a thing on a relay, which is not who authored it. */
+  relayArrivals?: (
+    envelopeHash: string
+  ) => { relayUrl: string; poster: string; selfPosted: boolean; at: number }[]
   /** Types the user can create something of (starters + library programs). */
   knownTypes?: () => { key: string; testKey: string; source: string; type: string; progHash: string }[]
   /** Local unsigned drafts, newest edit first. */
@@ -354,6 +372,8 @@ const shell: ShellSurface = { ready: false, lastConfirm: null, lastPublish: null
 /** Set once the seeder exists, so before-quit can shut it down (the service
  *  lives inside whenReady's closure, this handler does not). */
 let stopAllSeeding: (() => Promise<void>) | null = null
+/** Set once the relay service exists, so before-quit can close the sockets. */
+let stopRelays: (() => void) | null = null
 ;(app as unknown as { __shell: ShellSurface }).__shell = shell
 // The bridge/cage event log, readable from OUTSIDE the renderer via
 // `evaluate(({ app }) => app.__cage)` — same surface the cage harness exposes.
@@ -478,6 +498,7 @@ app.whenReady().then(async () => {
         submenu: [
           { label: 'Account & Keys…', click: () => chrome.webContents.send('shell:open-account') },
           { label: 'Transfers…', click: () => chrome.webContents.send('shell:open-sharing') },
+          { label: 'Relays…', click: () => chrome.webContents.send('shell:open-relays') },
           { label: 'People…', click: () => chrome.webContents.send('shell:open-people') },
           { type: 'separator' },
           process.platform === 'darwin' ? { role: 'close' as const } : { role: 'quit' as const }
@@ -758,7 +779,12 @@ app.whenReady().then(async () => {
     const tar = await buildBundle(keyring.signer, {
       program: base64ToBytes(programBase64),
       type: type.trim() || 'page',
-      attachments: attachmentsMap(attachments)
+      attachments: attachmentsMap(attachments),
+      // Bind this author's nostr key, covered by the signature. It is what
+      // lets a message on another network be checked against the thing it
+      // carries -- without it a relay event and a thing are two unrelated
+      // signatures that happen to arrive together.
+      enc: { e: NOSTR_ENC_SCHEME, ek: keyring.identity.nostrPubkey }
     })
     const outcome = await ingestBytes(tar)
     return { tar, outcome }
@@ -1645,7 +1671,12 @@ app.whenReady().then(async () => {
       program: stored.program,
       type: stored.manifest.type,
       args: stored.manifest.args,
-      attachments
+      attachments,
+      // Bind this author's nostr key, covered by the signature. It is what
+      // lets a message on another network be checked against the thing it
+      // carries -- without it a relay event and a thing are two unrelated
+      // signatures that happen to arrive together.
+      enc: { e: NOSTR_ENC_SCHEME, ek: keyring.identity.nostrPubkey }
     })
     return ingestBytes(tar)
   }
@@ -1975,6 +2006,151 @@ app.whenReady().then(async () => {
     return { tar, filename: `${safeType}-${envelopeHash.slice(0, 8)}.thing` }
   }
 
+  // ── Relays ─────────────────────────────────────────────────────────────────
+  // Until now every thing arrived because a human handed over its bytes. A
+  // relay is how one arrives that nobody handed you -- and that is ALL it is:
+  // reach, never authority. The bytes go through admission like any other
+  // stranger's, and nothing the relay says decides anything.
+  //
+  // Nothing is connected to and nothing is published by default. The relay
+  // list starts empty, and posting is a separate explicit act.
+  const nostr = new NostrService()
+  nostr.setMaxBundleBytes(MAX_INLINE_BUNDLE)
+
+  /** The one subscription for now: every thing, from the cursor forward. Once
+   *  forums exist this becomes one subscription per group. */
+  const SUB_ALL = 'things'
+  const subAll = (): { id: string; tags: Record<string, string[]>; since: number } => ({
+    id: SUB_ALL,
+    tags: { [TAG.topic]: ['thing'] },
+    since: library.cursor(SUB_ALL)
+  })
+
+  /** A thing off a relay. Untrusted exactly like a file or a URL: the bytes go
+   *  through admission and nothing the relay said decides anything. */
+  async function onRelayThing(ev: ParsedThingEvent, url: string): Promise<void> {
+    // The cursor advances on every event that PARSED, not only on the ones we
+    // kept: a duplicate or a thing we refuse is still history read, and leaving
+    // the cursor behind would make every reconnect re-read it.
+    //
+    // created_at is the POSTER's claim, so it is clamped. An event dated in the
+    // year 3000 would otherwise push the cursor past everything real and make
+    // the subscription silently deaf -- a one-line denial of service.
+    const notFuture = Math.floor(Date.now() / 1000) + 3600
+    if (ev.event.created_at > library.cursor(SUB_ALL) && ev.event.created_at <= notFuture) {
+      library.setCursor(SUB_ALL, ev.event.created_at)
+    }
+    // A pointer rather than an inline bundle: fetching those is the next slice,
+    // so record nothing rather than pretending to have it.
+    if (!ev.bundle) return
+    const held = library.get(ev.envelopeHash) !== null
+    if (!held) {
+      const outcome = await ingestBytes(ev.bundle)
+      if (outcome.status !== 'valid') {
+        record({
+          type: 'relay-refused',
+          relay: url,
+          hash: ev.envelopeHash,
+          reason: String(outcome.reason ?? outcome.status)
+        })
+        return
+      }
+      // The hash the event ADVERTISED must be the thing that arrived, or the
+      // event pointed at one thing and carried another.
+      if (outcome.envelopeHash !== ev.envelopeHash) {
+        record({ type: 'relay-mismatch', advertised: ev.envelopeHash, got: String(outcome.envelopeHash) })
+        return
+      }
+    }
+    // Posting is not authoring. Anyone may rebroadcast anyone's thing, so who
+    // handed it to us is recorded BESIDE the author the signature names --
+    // equal only when the author bound this nostr key to the thing themselves.
+    //
+    // The bound key is read from the LIBRARY rather than from the ingest that
+    // may not have happened: a thing arriving a second time, from a different
+    // poster, must be attributed as accurately as the first time.
+    const bound = library.boundEncKey(ev.envelopeHash)
+    library.noteRelayArrival(
+      ev.envelopeHash,
+      url,
+      ev.event.pubkey,
+      bound !== null && bound.scheme === NOSTR_ENC_SCHEME && bound.key === ev.event.pubkey,
+      Date.now()
+    )
+    if (!held) notifyFeedChanged()
+  }
+
+  nostr.setHandler((ev, url) => {
+    void onRelayThing(ev, url).catch(() => undefined)
+  })
+  stopRelays = () => nostr.destroy()
+
+  /** Talk to a relay, and ask it for things. Persisted, so it comes back on
+   *  the next launch; the human added it, the shell never adds one itself. */
+  function addRelay(input: unknown): Record<string, unknown> {
+    const url = typeof input === 'string' ? input.trim() : ''
+    if (!/^wss?:\/\/[^\s]+$/i.test(url)) return { error: 'a relay address looks like wss://relay.example' }
+    library.addRelay(url, Date.now())
+    nostr.connect(url)
+    nostr.subscribe(subAll())
+    return { added: url, relays: nostr.status() }
+  }
+
+  function removeRelay(input: unknown): Record<string, unknown> {
+    const url = typeof input === 'string' ? input.trim() : ''
+    const removed = library.removeRelay(url)
+    nostr.disconnect(url)
+    return { removed, relays: nostr.status() }
+  }
+
+  /** Send a thing to every connected relay. Deliberately an explicit act:
+   *  nothing reaches a relay because it was merely published. */
+  async function postToRelays(envelopeHash: unknown): Promise<Record<string, unknown>> {
+    if (typeof envelopeHash !== 'string' || isDraftId(envelopeHash)) {
+      return { error: 'a draft has nothing signed to post' }
+    }
+    const row = library.get(envelopeHash)
+    if (!row) return { error: 'not found' }
+    // A sealed thing is addressed to named readers. Handing it to a relay
+    // would not reveal its contents, but it would publish the fact of it to
+    // everyone -- so this refuses rather than deciding that for the human.
+    if (row.sealed) return { error: 'refusing to post a sealed thing to a relay' }
+    if (nostr.status().length === 0) return { error: 'no relays — add one first' }
+    const exported = exportThing(envelopeHash)
+    if ('error' in exported) return { error: exported.error }
+    const inline = exported.tar.length <= MAX_INLINE_BUNDLE
+    // Too big to carry: the event names the thing and says where to get it.
+    // A locator is only honest if we are actually serving it, so the magnet
+    // comes from the seeder and a thing that is not seeded says so.
+    const locator = inline ? null : seeder.magnetFor(envelopeHash)
+    if (!inline && !locator) {
+      return { error: 'too large to post inline — start seeding it first, so the event can point at it' }
+    }
+    const replyTo = refTarget(library.load(envelopeHash)?.manifest.args ?? null)
+    const event = await buildThingEvent(
+      {
+        envelopeHash,
+        type: row.type,
+        ...(inline ? { bundle: exported.tar } : { fetchLocator: locator! }),
+        ...(row.path ? { group: row.path } : {}),
+        ...(replyTo ? { replyTo } : {}),
+        createdAt: Math.floor(Date.now() / 1000)
+      },
+      keyring.nostrSecret
+    )
+    const sent = nostr.publish(event)
+    return { posted: sent, inline, relays: nostr.status().length, eventId: event.id }
+  }
+
+  function relayState(): Record<string, unknown> {
+    return { relays: nostr.status(), since: library.cursor(SUB_ALL) }
+  }
+
+  // Reconnect to the relays the human added, and resume each subscription from
+  // where it left off.
+  for (const url of library.relays()) nostr.connect(url)
+  if (library.relays().length > 0) nostr.subscribe(subAll())
+
   /** Delete a thing everywhere the shell holds it: close it if open, drop the
    *  library row (+ GC of now-unreferenced content blobs), and stop seeding
    *  its bundle. Copies held by others are of course unaffected — a signed
@@ -2051,6 +2227,11 @@ app.whenReady().then(async () => {
       type: p.draft.type,
       args,
       attachments: p.attachments,
+      // Bind this author's nostr key, covered by the signature. It is what
+      // lets a message on another network be checked against the thing it
+      // carries -- without it a relay event and a thing are two unrelated
+      // signatures that happen to arrive together.
+      enc: { e: NOSTR_ENC_SCHEME, ek: keyring.identity.nostrPubkey },
       ...(chain ? { path: chain.path, seq: chain.seq, prev: fromHex(chain.prev) } : {})
     })
     return ingestBytes(tar)
@@ -2324,6 +2505,13 @@ app.whenReady().then(async () => {
     typeof h === 'string' ? stopSeeding(h) : { stopped: false }
   )
   ipcMain.handle('shell:seed-status', () => seedingStatus())
+  ipcMain.handle('shell:relays', () => relayState())
+  ipcMain.handle('shell:relay-add', (_e, url: unknown) => addRelay(url))
+  ipcMain.handle('shell:relay-remove', (_e, url: unknown) => removeRelay(url))
+  ipcMain.handle('shell:relay-post', async (_e, h: unknown) => await postToRelays(h))
+  ipcMain.handle('shell:relay-arrivals', (_e, h: unknown) =>
+    typeof h === 'string' ? library.relayArrivals(h) : []
+  )
   ipcMain.handle('shell:close', () => {
     destroyCurrent()
   })
@@ -2345,6 +2533,11 @@ app.whenReady().then(async () => {
   shell.seedStart = (h) => startSeeding(h)
   shell.seedStop = (h) => stopSeeding(h)
   shell.seedStatus = () => seedingStatus()
+  shell.relays = () => relayState()
+  shell.addRelay = (url) => addRelay(url)
+  shell.removeRelay = (url) => removeRelay(url)
+  shell.postToRelays = (h) => postToRelays(h)
+  shell.relayArrivals = (h) => library.relayArrivals(h)
   shell.exportBase64 = (h) => {
     const r = exportThing(h)
     return 'error' in r ? { error: r.error } : { base64: bytesToBase64(r.tar), bytes: r.tar.length }
@@ -2505,6 +2698,7 @@ app.whenReady().then(async () => {
 // that is gone is rude to the swarm.
 app.on('before-quit', () => {
   void stopAllSeeding?.()
+  stopRelays?.()
 })
 
 app.on('window-all-closed', () => {

@@ -212,6 +212,16 @@ export class Keyring {
     Keyring.writeIdentity(userDataDir, this.#privkey)
   }
 
+  /** The nostr secret, for signing events on that network.
+   *
+   *  Deliberately narrow: this is the ONLY key material that leaves this class
+   *  besides the human-driven export below, and it exists because a relay event
+   *  must be signed by the key the thing's envelope names. It never signs a
+   *  thing -- that is the eth key's job and a different scheme entirely. */
+  get nostrSecret(): Uint8Array {
+    return this.#nostrPriv
+  }
+
   /** The raw secret, hex — for the human-driven backup flow ONLY. The UI must
    *  gate this behind an explicit confirmation. */
   exportSecretHex(): string {

@@ -30,7 +30,7 @@ const argv = process.argv.slice(2)
 // whole point of running under ELECTRON_RUN_AS_NODE. These three launch the
 // real app, so on headless Linux they need a virtual X server. Same detection,
 // for the same reason, as scripts/run-cage-tests.mjs.
-const NEEDS_DISPLAY = new Set(['open', 'live', 'magnet'])
+const NEEDS_DISPLAY = new Set(['open', 'live', 'magnet', 'relay'])
 const wantsDisplay = NEEDS_DISPLAY.has(argv[0])
 const hasDisplay = Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY)
 const xvfbAvailable = () =>

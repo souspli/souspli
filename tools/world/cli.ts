@@ -160,6 +160,8 @@ function usage(): void {
   log('  live <slug>...        launch real instances and hold them open')
   log('  magnet [--from ada] [--to grace] [--timeout 180000]')
   log('                        seed a fresh thing on one and fetch it on the other')
+  log('  relay  [--from ada] [--to grace] [--relay wss://…]')
+  log('                        post a thing on one; receive it on the other, unasked')
   log('  reset                 delete world/ entirely')
 }
 
@@ -179,6 +181,11 @@ async function main(): Promise<void> {
       if (!rest[0]) throw new Error('show needs an account slug, e.g. `pnpm world show ada`')
       show(rest[0])
       break
+    case 'relay': {
+      const { runRelay } = await import('./relay.js')
+      await runRelay(rest)
+      break
+    }
     case 'magnet': {
       const { runMagnet } = await import('./magnet.js')
       await runMagnet(rest)

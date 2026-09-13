@@ -29,6 +29,15 @@ interface ShellApi {
   seedStart(envelopeHash: string): Promise<{ magnet?: string; error?: string }>
   seedStop(envelopeHash: string): Promise<{ stopped: boolean }>
   seedStatus(): Promise<{ envelopeHash: string; magnet: string; peers: number; bytes: number; type: string }[]>
+  relays(): Promise<{
+    relays: { url: string; state: string; error: string | null; received: number; refused: number }[]
+    since: number
+  }>
+  addRelay(url: string): Promise<Record<string, unknown>>
+  removeRelay(url: string): Promise<Record<string, unknown>>
+  postToRelays(envelopeHash: string): Promise<Record<string, unknown>>
+  relayArrivals(envelopeHash: string): Promise<{ relayUrl: string; poster: string; selfPosted: boolean; at: number }[]>
+  onOpenRelays(cb: () => void): void
   deleteThing(envelopeHash: string): Promise<{ deleted: boolean }>
   overlay(delta: 1 | -1): void
   accountAccounts(mnemonic: string, count?: number): Promise<
@@ -1337,7 +1346,58 @@ function openShareModal(envelopeHash: string, type: string): void {
     .catch(() => paintSeed(null))
 
   seedRow.append(seedBtn, seedNote)
-  body.append(copyRow, saveRow, warn, seedRow, magnetSlot)
+
+  // ── Post to a relay ──────────────────────────────────────────────────────
+  // The other row here that exposes something, and the only one that reaches
+  // people who never asked. Same rule as seeding: say what it means before the
+  // control, and do nothing until asked.
+  const relayRow = el('div', 'sh-share-row sh-share-row--relay')
+  const relayBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Post to relays') as HTMLButtonElement
+  relayBtn.setAttribute('data-testid', 'share-relay-post')
+  const relayNote = el('div', 'sh-hint sh-share-note')
+  relayNote.setAttribute('data-testid', 'share-relay-note')
+  relayNote.textContent = 'Checking…'
+  const relayWarn = el('p', 'sh-share-warn')
+  relayWarn.textContent =
+    'Posting hands this thing to every relay you have added, for anyone reading them. The bundle is unchanged and still signed by you — but the relay learns your address, and its readers learn that your key published this.'
+  relayBtn.addEventListener('click', async () => {
+    relayBtn.disabled = true
+    relayNote.textContent = 'Posting…'
+    try {
+      const r = await shell.postToRelays(envelopeHash)
+      if (r.error) {
+        relayNote.textContent = String(r.error)
+        return
+      }
+      const n = Number(r.posted ?? 0)
+      relayNote.textContent =
+        n === 0
+          ? 'No relay took it — none are connected right now.'
+          : `Posted to ${n === 1 ? '1 relay' : `${n} relays`}${r.inline === false ? ', as a link to the bundle' : ''}.`
+    } finally {
+      relayBtn.disabled = false
+    }
+  })
+  // How many relays there are decides whether this control can do anything, so
+  // say which it is rather than letting the human find out by pressing it.
+  void shell
+    .relays()
+    .then((state) => {
+      const open = state.relays.filter((r) => r.state === 'open').length
+      relayBtn.disabled = state.relays.length === 0
+      relayNote.textContent =
+        state.relays.length === 0
+          ? 'No relays yet — add one under File → Relays.'
+          : open === 0
+            ? 'No relay is connected right now.'
+            : `Ready: ${open === 1 ? '1 relay' : `${open} relays`} connected.`
+    })
+    .catch(() => {
+      relayNote.textContent = ''
+    })
+  relayRow.append(relayBtn, relayNote)
+
+  body.append(copyRow, saveRow, warn, seedRow, magnetSlot, relayWarn, relayRow)
 
   const footer = el('div', 'evm-modal-footer')
   const close = el('button', 'evm-btn evm-btn--ghost', 'Close')
@@ -1544,6 +1604,147 @@ function openTransfersModal(focusId?: string): void {
   )
   void shell.transfers().then(paint).catch(() => undefined)
 }
+
+/** The relays this shell talks to.
+ *
+ *  Every other transport in the shell is a PULL: you fetch a locator, or
+ *  somebody hands you a file. A relay is the first one that brings you things
+ *  nobody handed you — which is the point, and is also the exposure, so both
+ *  are said here rather than in a footnote.
+ *
+ *  Two disclosures, because they are two different leaks:
+ *   - posting tells the relay and its readers that this key published this
+ *     thing, and tells the relay your address;
+ *   - SUBSCRIBING tells the relay what you are interested in. None of the
+ *     other transports leak that, and it is the one people do not expect. */
+function openRelaysModal(): void {
+  const overlay = el('div', 'evm-modal-overlay')
+  const modal = el('div', 'evm-modal sh-relays')
+  modal.setAttribute('data-testid', 'relays-modal')
+  const header = el('div', 'evm-modal-header')
+  header.append(el('span', 'evm-modal-title', 'Relays'))
+  const body = el('div', 'evm-modal-body')
+
+  const list = el('div', 'sh-relay-list')
+  list.setAttribute('data-testid', 'relay-list')
+
+  const addRow = el('div', 'sh-relay-add')
+  const input = el('input', 'evm-input sh-relay-input') as HTMLInputElement
+  input.type = 'text'
+  input.placeholder = 'wss://relay.example'
+  input.setAttribute('data-testid', 'relay-input')
+  const addBtn = el('button', 'evm-btn evm-btn--primary evm-btn--sm', 'Add relay') as HTMLButtonElement
+  addBtn.setAttribute('data-testid', 'relay-add')
+  const note = el('div', 'sh-hint sh-relay-note')
+  note.setAttribute('data-testid', 'relay-note')
+  addRow.append(input, addBtn)
+
+  const paint = (state: {
+    relays: { url: string; state: string; error: string | null; received: number; refused: number }[]
+  }): void => {
+    list.replaceChildren()
+    list.setAttribute('data-count', String(state.relays.length))
+    if (state.relays.length === 0) {
+      const none = el('p', 'sh-hint', 'No relays. Nothing is being sent or received over one.')
+      none.setAttribute('data-testid', 'relay-empty')
+      list.append(none)
+      return
+    }
+    for (const r of state.relays) {
+      const row = el('div', 'sh-relay-row')
+      row.setAttribute('data-relay-url', r.url)
+      const head = el('div', 'sh-relay-head')
+      const badge = el(
+        'span',
+        `evm-badge evm-badge--${r.state === 'open' ? 'success' : r.state === 'connecting' ? 'neutral' : 'warning'}`,
+        r.state
+      )
+      badge.setAttribute('data-testid', 'relay-state')
+      head.append(badge, el('span', 'sh-relay-url', r.url))
+      // Refused is worth showing beside received: a relay sending mostly
+      // rubbish is a fact about that relay, and the only place it is visible.
+      head.append(el('span', 'sh-hint', `${r.received} in · ${r.refused} refused`))
+      const remove = el('button', 'evm-btn evm-btn--ghost evm-btn--sm', 'Remove')
+      remove.setAttribute('data-testid', 'relay-remove')
+      remove.addEventListener('click', async () => {
+        await shell.removeRelay(r.url)
+        void refresh()
+      })
+      head.append(remove)
+      row.append(head)
+      if (r.error) row.append(el('div', 'sh-hint', r.error))
+      list.append(row)
+    }
+  }
+
+  const refresh = async (): Promise<void> => {
+    try {
+      paint(await shell.relays())
+    } catch {
+      /* the window is closing */
+    }
+  }
+
+  addBtn.addEventListener('click', async () => {
+    const url = input.value.trim()
+    if (!url) return
+    addBtn.disabled = true
+    try {
+      const r = await shell.addRelay(url)
+      if (r.error) {
+        note.textContent = String(r.error)
+        return
+      }
+      note.textContent = `Connected to ${url}. You will start receiving things posted there.`
+      input.value = ''
+      await refresh()
+    } finally {
+      addBtn.disabled = false
+    }
+  })
+  input.addEventListener('keydown', (e) => {
+    if ((e as KeyboardEvent).key === 'Enter') addBtn.click()
+  })
+
+  body.append(
+    el(
+      'p',
+      'sh-hint',
+      'A relay is how a thing reaches you when nobody handed you its bytes. It has no authority: everything a relay sends is checked exactly like a file from a stranger, and the signature — never the relay — says who wrote it.'
+    ),
+    list,
+    el('h3', 'sh-transfers-h', 'Add a relay'),
+    addRow,
+    note,
+    el(
+      'p',
+      'sh-share-warn',
+      'Subscribing tells the relay what you are interested in, and your address. Posting tells it — and everyone reading it — that your key published that thing. Nothing is posted automatically: each one is a separate act, from Share.'
+    )
+  )
+
+  const footer = el('div', 'evm-modal-footer')
+  const close = el('button', 'evm-btn evm-btn--ghost', 'Close')
+  close.setAttribute('data-testid', 'relays-close')
+  close.addEventListener('click', () => overlay.remove())
+  footer.append(close)
+
+  modal.append(header, body, footer)
+  overlay.append(modal)
+  document.body.append(
+    trackOverlay(overlay, () => {
+      if (relayPoll !== null) clearInterval(relayPoll)
+      relayPoll = null
+    })
+  )
+  void refresh()
+  // A connection's state changes without anything telling the chrome, so this
+  // one window polls. Cheap, and it stops when the window closes.
+  relayPoll = setInterval(() => void refresh(), 1_000)
+}
+
+/** Set while the Relays window is open, so its poll can be stopped. */
+let relayPoll: ReturnType<typeof setInterval> | null = null
 
 /** Set while the Transfers window is open, so pushes land somewhere. */
 let transfersPainter: ((s: TransferState) => void) | null = null
@@ -1964,6 +2165,10 @@ async function openRepliesModal(target: string): Promise<void> {
 // ── Per-thing trust header ───────────────────────────────────────────────────
 function renderHeader(h: HeaderFacts | null): void {
   thingHeader.replaceChildren()
+  // Which thing this row is describing. The header is rebuilt per open, so
+  // anything filled in asynchronously must check this before touching it.
+  if (h) thingHeader.setAttribute('data-envelope-hash', h.envelopeHash)
+  else thingHeader.removeAttribute('data-envelope-hash')
   if (!h) {
     modeButtons = null
     trustBadge = null
@@ -2245,6 +2450,38 @@ function renderHeader(h: HeaderFacts | null): void {
     replyBits.push(at)
   }
 
+  // How this thing REACHED you, when it came off a relay. Deliberately its own
+  // chip, next to the author and never merged with them: whoever posted a
+  // thing to a relay is a messenger, and anyone may relay anyone. The author
+  // is, always, whoever signed it -- shown at the left of this row.
+  //
+  // Filled in asynchronously (the header is built from what main already
+  // knows), and only when there IS something to say.
+  if (!h.draft) {
+    const askedFor = h.envelopeHash
+    void shell
+      .relayArrivals(askedFor)
+      .then((arrivals) => {
+        // The header is rebuilt per open; a slow answer must not decorate
+        // whatever thing is on screen by the time it lands.
+        if (arrivals.length === 0 || thingHeader.getAttribute('data-envelope-hash') !== askedFor) return
+        const relayed = arrivals.filter((a) => !a.selfPosted)
+        const chip = el(
+          'span',
+          'sh-replyto sh-replyto--known',
+          relayed.length > 0 ? `relayed by ${short(relayed[0]!.poster, 6)}` : 'posted by its author'
+        )
+        chip.setAttribute('data-testid', 'header-relayed')
+        chip.setAttribute('data-relayed', relayed.length > 0 ? '1' : '0')
+        chip.title =
+          relayed.length > 0
+            ? `Handed to you on ${relayed[0]!.relayUrl} by ${relayed[0]!.poster}. That is who passed it along, NOT who wrote it — the author is the key this row names, because the author is whoever signed it.`
+            : `Posted to ${arrivals[0]!.relayUrl} by its own author: the key that signed this thing is the key that posted it.`
+        thingHeader.append(chip)
+      })
+      .catch(() => undefined)
+  }
+
   // Where the author sits relative to you. Shown only when they are actually
   // reachable from your own vouches -- absence is the normal case and needs no
   // badge, and a "0" would read as a score, which this is not.
@@ -2387,7 +2624,9 @@ function bytesToBase64(bytes: Uint8Array): string {
    *  reading are the ones a hermetic test cannot produce -- a peer that is
    *  discovered but will not answer needs a real unreachable peer -- and the
    *  wording for exactly that case is the point of the window. */
-  paintTransfers: (state: TransferState) => transfersPainter?.(state)
+  paintTransfers: (state: TransferState) => transfersPainter?.(state),
+  openRelays: openRelaysModal,
+  openShare: openShareModal
 }
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
@@ -2438,6 +2677,7 @@ shell.onPublishResult((o) => {
   } else showText(`Publish failed: ${String(o.reason ?? o.status)}`, 'danger')
 })
 shell.onOpenSharing(() => openTransfersModal())
+shell.onOpenRelays(() => openRelaysModal())
 // Pushed while anything is in flight; ignored when the window is closed.
 shell.onTransfers((state) => transfersPainter?.(state))
 shell.onOpenPeople(() => openPeopleModal())

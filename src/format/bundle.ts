@@ -337,6 +337,14 @@ export interface BuildBundleOptions {
   path?: string
   seq?: number
   prev?: Hash
+  /** Bind an encryption key to the author (Author.e / Author.ek, §5.2).
+   *
+   *  Covered by the signature, which is the whole point: it lets a thing say
+   *  WHICH other key speaks for its author. That is what makes a message on
+   *  another network -- a nostr event, say -- checkable against the thing it
+   *  carries, rather than two unrelated signatures that happen to arrive
+   *  together. */
+  enc?: { e: string; ek: Uint8Array }
 }
 
 /**
@@ -358,6 +366,7 @@ export async function buildBundle(signer: Signer, opts: BuildBundleOptions): Pro
   if (opts.path !== undefined) unsigned.path = opts.path
   if (opts.seq !== undefined) unsigned.seq = opts.seq
   if (opts.prev !== undefined) unsigned.prev = opts.prev
+  if (opts.enc !== undefined) unsigned.enc = opts.enc
   const envelope = await encodeEnvelope(unsigned, signer)
   return packBundle({ envelope, manifest: manifestBytes, program: opts.program, blobs })
 }

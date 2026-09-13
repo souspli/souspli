@@ -375,6 +375,26 @@ body {
 .sh-sharing-head { display: flex; align-items: center; gap: var(--evm-space-2); margin-bottom: var(--evm-space-2); }
 .sh-sharing-head > .sh-hint { flex: 1; }
 
+/* Relays. One relay per row, state first: whether it is connected is the
+   only thing that decides if any of this is doing anything. */
+.sh-relays { max-width: 44em; }
+.sh-relay-list { margin: var(--evm-space-3) 0; }
+.sh-relay-row { border-top: 1px solid var(--evm-border); padding: var(--evm-space-3) 0; }
+.sh-relay-head { display: flex; align-items: center; gap: var(--evm-space-2); }
+.sh-relay-url {
+  flex: 1;
+  font-family: var(--evm-font-mono);
+  font-size: var(--evm-text-sm);
+  color: var(--evm-text-1);
+  overflow-wrap: anywhere;
+}
+.sh-relay-add { display: flex; gap: var(--evm-space-2); align-items: center; }
+.sh-relay-input { flex: 1; min-width: 0; }
+.sh-relay-note { margin-top: var(--evm-space-2); min-height: 1.2em; }
+
+/* Where a thing came from over a relay — never confused with who wrote it. */
+.sh-relayed { margin-top: var(--evm-space-2); }
+
 /* Account & Keys modal. */
 .sh-account {
   max-width: 760px;
