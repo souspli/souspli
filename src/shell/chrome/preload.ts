@@ -126,6 +126,11 @@ const shell = {
     ipcRenderer.invoke('shell:seed-stop', envelopeHash),
   seedStatus: (): Promise<{ envelopeHash: string; magnet: string; peers: number; bytes: number; type: string }[]> =>
     ipcRenderer.invoke('shell:seed-status'),
+  /** Things a relay says exist that you do not hold, and the press that
+   *  fetches one. Nothing in the shell follows a pointer on its own. */
+  offers: (inGroup?: string): Promise<Record<string, unknown>[]> => ipcRenderer.invoke('shell:offers', inGroup),
+  fetchOffer: (envelopeHash: string): Promise<Record<string, unknown>> =>
+    ipcRenderer.invoke('shell:fetch-offer', envelopeHash),
   /** Votes. A vote is about a THING; saying you know a KEY is a vouch, and
    *  the shell keeps them apart because it walks vouch edges to build your
    *  tribe. Casting one signs immediately — the click was the intent. */

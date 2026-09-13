@@ -49,6 +49,59 @@ export interface ThingRow {
   cosignable?: boolean
 }
 
+/** A thing a relay says exists that you do not hold.
+ *
+ *  The mirror image of a draft: a draft is a thing you have and have not
+ *  signed; an offer is a thing signed that you do not have. Both are rows the
+ *  feed shows that are not library things.
+ *
+ *  `type`, `inGroup` and `replyTo` come from the EVENT, so they are the
+ *  poster's claims about something nobody here has read yet. There is
+ *  deliberately no author: the event names a nostr key, and who signed the
+ *  thing is inside an envelope that has not arrived. */
+export interface OfferRow {
+  envelopeHash: string
+  locator: string
+  relayUrl: string
+  /** The nostr key that posted the event. NOT the author. */
+  poster: string
+  type: string
+  inGroup: string | null
+  replyTo: string | null
+  state: 'offered' | 'fetching' | 'failed'
+  reason: string
+  transferId: string | null
+  seenAt: number
+}
+
+type OfferDbRow = {
+  envelope_hash: string
+  locator: string
+  relay_url: string
+  poster: string
+  type: string
+  in_group: string | null
+  reply_to: string | null
+  state: string
+  reason: string
+  transfer_id: string | null
+  seen_at: number
+}
+
+const toOfferRow = (r: OfferDbRow): OfferRow => ({
+  envelopeHash: r.envelope_hash,
+  locator: r.locator,
+  relayUrl: r.relay_url,
+  poster: r.poster,
+  type: r.type,
+  inGroup: r.in_group,
+  replyTo: r.reply_to,
+  state: r.state === 'fetching' || r.state === 'failed' ? r.state : 'offered',
+  reason: r.reason,
+  transferId: r.transfer_id,
+  seenAt: r.seen_at
+})
+
 export interface FeedQuery {
   type?: string
   author?: string
@@ -302,7 +355,8 @@ export class Library {
   // would silently put someone's private thing on disk in the clear.
   private readonly sealed = new EphemeralStore()
 
-  constructor(dir: string) {
+  constructor(dir: string, opts: { maxOffers?: number } = {}) {
+    if (opts.maxOffers !== undefined && opts.maxOffers > 0) this.maxOffers = opts.maxOffers
     mkdirSync(dir, { recursive: true })
     this.db = new Database(join(dir, 'index.sqlite'))
     this.db.pragma('journal_mode = WAL')
@@ -511,6 +565,29 @@ export class Library {
         sub_id TEXT PRIMARY KEY,
         since  INTEGER NOT NULL
       );
+      -- A thing a relay says exists that we do NOT hold: the event carried a
+      -- hash and a locator instead of bytes, because the bundle was over the
+      -- inline cap. Nothing is fetched until a human presses Fetch, so this is
+      -- the record of what is on offer in the meantime.
+      --
+      -- type/group/reply_to are the POSTER'S hints, not facts. The author is
+      -- deliberately absent: the event names a nostr key, and who signed the
+      -- thing is inside an envelope nobody has yet.
+      CREATE TABLE IF NOT EXISTS offers (
+        envelope_hash TEXT PRIMARY KEY,
+        locator       TEXT NOT NULL,
+        relay_url     TEXT NOT NULL DEFAULT '',
+        poster        TEXT NOT NULL DEFAULT '',
+        type          TEXT NOT NULL DEFAULT '',
+        in_group      TEXT,
+        reply_to      TEXT,
+        state         TEXT NOT NULL DEFAULT 'offered',
+        reason        TEXT NOT NULL DEFAULT '',
+        transfer_id   TEXT,
+        seen_at       INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_offers_group ON offers(in_group);
+
       -- Who offered us a thing on a relay. Posting is NOT authoring: anyone
       -- may rebroadcast anything, so this records the messenger separately
       -- from the author the signature names, and never in place of them.
@@ -1015,6 +1092,95 @@ export class Library {
 
   clearDraftChain(draftId: string): void {
     this.db.prepare('DELETE FROM draft_chain WHERE draft_id = ?').run(draftId)
+  }
+
+  // ── Offers ─────────────────────────────────────────────────────────────────
+  // A thing a relay advertised that we do not hold. Nothing here fetches
+  // anything: an offer is a note saying something exists and where to get it,
+  // and it stays a note until a human presses Fetch.
+
+  /** How many offers are kept. A relay can advertise pointers forever, and this
+   *  table is the one place that turns into disk, so the newest win and the
+   *  rest are dropped. Losing an old offer costs nothing -- the thing still
+   *  exists, and whoever is seeding it can advertise it again. */
+  private maxOffers = 500
+
+  /** Note that a relay is offering a thing. Ignored if we already hold it.
+   *
+   *  A second advertisement of the same thing refreshes where to get it, so a
+   *  dead seeder can be superseded by a live one -- but never over a fetch
+   *  that is already running, which would swap the locator mid-transfer. */
+  recordOffer(o: {
+    envelopeHash: string
+    locator: string
+    relayUrl: string
+    poster: string
+    type: string
+    inGroup: string | null
+    replyTo: string | null
+    now: number
+  }): boolean {
+    if (this.get(o.envelopeHash)) return false
+    const existing = this.offer(o.envelopeHash)
+    if (existing && existing.state === 'fetching') return false
+    this.db
+      .prepare(
+        `INSERT INTO offers
+           (envelope_hash, locator, relay_url, poster, type, in_group, reply_to, state, reason, transfer_id, seen_at)
+         VALUES (?,?,?,?,?,?,?,'offered','',NULL,?)
+         ON CONFLICT(envelope_hash) DO UPDATE SET
+           locator = excluded.locator, relay_url = excluded.relay_url, poster = excluded.poster,
+           type = excluded.type, in_group = excluded.in_group, reply_to = excluded.reply_to,
+           state = 'offered', reason = '', transfer_id = NULL, seen_at = excluded.seen_at`
+      )
+      .run(o.envelopeHash, o.locator, o.relayUrl, o.poster, o.type, o.inGroup, o.replyTo, o.now)
+    this.db
+      .prepare(
+        `DELETE FROM offers WHERE envelope_hash NOT IN (
+           SELECT envelope_hash FROM offers ORDER BY seen_at DESC, rowid DESC LIMIT ?
+         )`
+      )
+      .run(this.maxOffers)
+    return true
+  }
+
+  offer(envelopeHash: string): OfferRow | null {
+    const r = this.db.prepare('SELECT * FROM offers WHERE envelope_hash = ?').get(envelopeHash) as
+      | OfferDbRow
+      | undefined
+    return r ? toOfferRow(r) : null
+  }
+
+  /** Offers not yet fetched, newest first. `inGroup` filters to one forum. */
+  offers(query: { inGroup?: string; limit?: number } = {}): OfferRow[] {
+    const rows = query.inGroup
+      ? (this.db
+          .prepare('SELECT * FROM offers WHERE in_group = ? ORDER BY seen_at DESC LIMIT ?')
+          .all(query.inGroup, query.limit ?? 200) as OfferDbRow[])
+      : (this.db
+          .prepare('SELECT * FROM offers ORDER BY seen_at DESC LIMIT ?')
+          .all(query.limit ?? 200) as OfferDbRow[])
+    return rows.map(toOfferRow)
+  }
+
+  setOfferState(envelopeHash: string, state: OfferRow['state'], reason = '', transferId: string | null = null): void {
+    this.db
+      .prepare('UPDATE offers SET state = ?, reason = ?, transfer_id = ? WHERE envelope_hash = ?')
+      .run(state, reason, transferId, envelopeHash)
+  }
+
+  /** The offer a running transfer is discharging, if any. Survives a restart,
+   *  which is the point: a magnet resumed on the next launch still has to
+   *  deliver the thing it was started for. */
+  offerForTransfer(transferId: string): OfferRow | null {
+    const r = this.db.prepare('SELECT * FROM offers WHERE transfer_id = ?').get(transferId) as
+      | OfferDbRow
+      | undefined
+    return r ? toOfferRow(r) : null
+  }
+
+  dropOffer(envelopeHash: string): boolean {
+    return this.db.prepare('DELETE FROM offers WHERE envelope_hash = ?').run(envelopeHash).changes > 0
   }
 
   // ── Relays ─────────────────────────────────────────────────────────────────
