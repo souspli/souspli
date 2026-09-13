@@ -13,8 +13,15 @@ pnpm world ls            # the roster, addresses, how much each holds
 pnpm world show ada      # one account: its tribe and its feed
 pnpm world open ada      # the real GUI, on Ada's library
 pnpm world live ada grace   # several instances at once
+pnpm world magnet        # seed on one instance, fetch it on another
+pnpm world relay         # post on one; receive it on another, unasked
 pnpm world reset         # delete world/
 ```
+
+`magnet` and `relay` are the two-machine tests, on one machine: two real
+instances, two real keys, two real libraries, and bytes actually moving between
+them. `relay` starts a local relay in-process by default, so it works offline;
+`--relay wss://…` points it at a real one.
 
 ## Why it is cheap
 

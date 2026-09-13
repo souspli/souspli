@@ -447,6 +447,37 @@ export class Library {
       );
       CREATE INDEX IF NOT EXISTS idx_group_members_key ON group_members(scheme, key);
 
+      -- Relays this shell talks to, and how far through each subscription it
+      -- has read. The cursor matters: without it a reconnect re-ingests the
+      -- relay's whole history every time.
+      CREATE TABLE IF NOT EXISTS relays (
+        url      TEXT PRIMARY KEY,
+        added_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS relay_cursor (
+        sub_id TEXT PRIMARY KEY,
+        since  INTEGER NOT NULL
+      );
+      -- Who offered us a thing on a relay. Posting is NOT authoring: anyone
+      -- may rebroadcast anything, so this records the messenger separately
+      -- from the author the signature names, and never in place of them.
+      -- The encryption key an author bound to a thing (Author.e/ek). Its whole
+      -- job is to answer "is the key that posted this the key that signed it?"
+      CREATE TABLE IF NOT EXISTS thing_enc (
+        envelope_hash TEXT PRIMARY KEY,
+        scheme        TEXT NOT NULL,
+        key           TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS relay_arrivals (
+        envelope_hash TEXT NOT NULL,
+        relay_url     TEXT NOT NULL,
+        poster        TEXT NOT NULL,
+        self_posted   INTEGER NOT NULL DEFAULT 0,
+        at            INTEGER NOT NULL,
+        PRIMARY KEY (envelope_hash, relay_url, poster)
+      );
+
       CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
     `)
     this.backfillRefs()
@@ -621,6 +652,16 @@ export class Library {
         )
         const manifestHash = toHex(env.man)
         named.forEach((sg, i) => insertSigner.run(manifestHash, i, sg.scheme, sg.key, sg.role, sg.name))
+      }
+
+      // The encryption key the author BOUND to this thing (Author.e/ek, §5.2),
+      // when there is one. Covered by the signature, so it is the author
+      // saying which other key speaks for them -- which is the only way to
+      // tell "the author posted this" from "somebody relayed it".
+      if (env.author.e && env.author.ek) {
+        this.db
+          .prepare('INSERT OR REPLACE INTO thing_enc (envelope_hash, scheme, key) VALUES (?,?,?)')
+          .run(envelopeHash, env.author.e, toHex(env.author.ek))
       }
 
       // What this version claims to follow, so the claim can be checked later.
@@ -846,6 +887,70 @@ export class Library {
 
   clearDraftChain(draftId: string): void {
     this.db.prepare('DELETE FROM draft_chain WHERE draft_id = ?').run(draftId)
+  }
+
+  // ── Relays ─────────────────────────────────────────────────────────────────
+  // Which relays this shell talks to, how far each subscription has read, and
+  // who handed us each thing. Nothing here is connected to by itself: the
+  // table is a list of relays the human added, and an empty table is the
+  // default.
+
+  relays(): string[] {
+    return (this.db.prepare('SELECT url FROM relays ORDER BY added_at ASC').all() as { url: string }[]).map(
+      (r) => r.url
+    )
+  }
+
+  addRelay(url: string, now: number): void {
+    this.db.prepare('INSERT OR IGNORE INTO relays (url, added_at) VALUES (?,?)').run(url, now)
+  }
+
+  removeRelay(url: string): boolean {
+    return this.db.prepare('DELETE FROM relays WHERE url = ?').run(url).changes > 0
+  }
+
+  /** How far a subscription has read, so a reconnect resumes. */
+  cursor(subId: string): number {
+    const r = this.db.prepare('SELECT since FROM relay_cursor WHERE sub_id = ?').get(subId) as
+      | { since: number }
+      | undefined
+    return r ? r.since : 0
+  }
+
+  setCursor(subId: string, since: number): void {
+    this.db.prepare('INSERT OR REPLACE INTO relay_cursor (sub_id, since) VALUES (?,?)').run(subId, since)
+  }
+
+  /** The encryption key this thing's author bound to it, or null. */
+  boundEncKey(envelopeHash: string): { scheme: string; key: string } | null {
+    const r = this.db.prepare('SELECT scheme, key FROM thing_enc WHERE envelope_hash = ?').get(envelopeHash) as
+      | { scheme: string; key: string }
+      | undefined
+    return r ?? null
+  }
+
+  /** Record that `poster` offered this thing on `url`. Kept per (thing, relay,
+   *  poster) because "who relayed it" is a different fact per relayer, and the
+   *  one the chrome must not confuse with authorship. */
+  noteRelayArrival(envelopeHash: string, url: string, poster: string, selfPosted: boolean, at: number): void {
+    this.db
+      .prepare(
+        'INSERT OR REPLACE INTO relay_arrivals (envelope_hash, relay_url, poster, self_posted, at) VALUES (?,?,?,?,?)'
+      )
+      .run(envelopeHash, url, poster, selfPosted ? 1 : 0, at)
+  }
+
+  /** How a thing reached us over relays, newest first. */
+  relayArrivals(envelopeHash: string): { relayUrl: string; poster: string; selfPosted: boolean; at: number }[] {
+    const rows = this.db
+      .prepare('SELECT relay_url, poster, self_posted, at FROM relay_arrivals WHERE envelope_hash = ? ORDER BY at DESC')
+      .all(envelopeHash) as { relay_url: string; poster: string; self_posted: number; at: number }[]
+    return rows.map((r) => ({
+      relayUrl: r.relay_url,
+      poster: r.poster,
+      selfPosted: r.self_posted === 1,
+      at: r.at
+    }))
   }
 
   // ── Version chains ─────────────────────────────────────────────────────────
