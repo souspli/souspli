@@ -9,6 +9,7 @@
 
 import { author, cosign, deliver, introduce, publish, type Delivered } from './author.js'
 import type { OpenAccount } from './account.js'
+import { ballast, posterArt, skyline } from './image.js'
 
 const DAY = 86_400
 /** A fixed base time so a rebuilt world has the same timestamps. 2026-06-01. */
@@ -198,10 +199,10 @@ async function articleWithAttestations(c: Cast, log: (s: string) => void): Promi
         published: '2026-06-09',
         location: 'Harbour Yard',
         body: [
-          { kind: 'p', text: 'The committee approved the scheme on Tuesday evening after a hearing that ran past eleven o’clock.' },
-          { kind: 'h2', text: 'What was decided' },
-          { kind: 'p', text: 'Consent covers 240 homes, a school, and the retention of the listed crane on the eastern quay.' },
-          { kind: 'p', text: 'Objectors have six weeks in which to seek judicial review.' }
+          { kind: 'paragraph', text: 'The committee approved the scheme on Tuesday evening after a hearing that ran past eleven o’clock.' },
+          { kind: 'heading', text: 'What was decided' },
+          { kind: 'paragraph', text: 'Consent covers 240 homes, a school, and the retention of the listed crane on the eastern quay.' },
+          { kind: 'paragraph', text: 'Objectors have six weeks in which to seek judicial review.' }
         ]
       }
     },
@@ -290,17 +291,21 @@ async function group(c: Cast, log: (s: string) => void): Promise<void> {
   log('  group: editorial roster, amended once — Edith written out, two added')
 }
 
-/** A forum, so the thing the whole slice is for is actually there to look at.
+/** Two forums, with enough in them to be worth reading.
  *
- *  The scenario is built around the one property that is hard to believe until
- *  you see it: the SAME forum ranks differently in different libraries. A post
- *  three strangers shouted for outranks nothing, while a post one person you
- *  vouched for liked goes to the top -- and the two readers below are looking
- *  at identical bytes. */
+ *  The scenario is built around the property that is hard to believe until you
+ *  watch it: the SAME forum ranks differently in different libraries. Four
+ *  strangers can shout a listicle to the top of a raw count, and one person you
+ *  actually vouched for voting against it puts it last -- in YOUR copy, with
+ *  nobody's bytes having changed.
+ *
+ *  Everything else here is the texture that makes that legible: real posts
+ *  rather than stage directions, a discussion deep enough to need threading,
+ *  votes on the comments as well as the posts, both kinds of moderator verdict,
+ *  somebody asking to get in, and one post too big to travel inline. */
 async function forum(c: Cast, log: (s: string) => void): Promise<void> {
-  const readers = ['ada', 'grace', 'alan', 'katherine', 'dorothy', 'mary', 'joan', 'edith', 'linus'].map(
-    (k) => c[k]!
-  )
+  const press = ['ada', 'grace', 'alan', 'katherine', 'dorothy', 'mary', 'joan', 'edith'].map((k) => c[k]!)
+  const readers = [...press, c.linus!, c.thurgood!]
   const member = (a: OpenAccount, role: string): Record<string, string> => ({
     key: a.who.address,
     scheme: 'eth-eip191',
@@ -308,132 +313,407 @@ async function forum(c: Cast, log: (s: string) => void): Promise<void> {
     name: a.who.name
   })
 
-  // Ada keeps it; Grace moderates. A moderator's whole authority is this line
+  // ── The wire: the press desk's own forum ─────────────────────────────────
+  // Ada keeps it, Grace moderates. A moderator's whole authority is this line
   // in a roster, in the libraries that hold it.
-  const forumRoot = await publish(
-    c.ada!,
-    {
-      type: 'group',
-      created: T0 + 11 * DAY,
-      args: {
-        name: 'Meridian Press — the wire',
-        purpose: 'Anything worth the desk’s attention. Post, argue, vote.',
-        members: [member(c.ada!, 'founder'), member(c.grace!, 'moderator'), member(c.alan!, 'member')],
-        notes: 'Grace moderates. Being listed here is Ada’s claim, not your consent.'
-      }
-    },
-    readers
-  )
-  const root = forumRoot.envelopeHash
+  const wire = (
+    await publish(
+      c.ada!,
+      {
+        type: 'group',
+        created: T0 + 11 * DAY,
+        args: {
+          name: 'Meridian Press — the wire',
+          purpose: 'Anything worth the desk’s attention. Post it, argue about it, vote.',
+          members: [
+            member(c.ada!, 'founder'),
+            member(c.grace!, 'moderator'),
+            member(c.alan!, 'member'),
+            member(c.katherine!, 'member'),
+            member(c.mary!, 'member'),
+            member(c.joan!, 'member')
+          ],
+          notes: 'Grace moderates. Being listed here is Ada’s claim, not your consent.'
+        }
+      },
+      readers
+    )
+  ).envelopeHash
 
-  const post = async (who: OpenAccount, title: string, body: string, at: number): Promise<string> =>
+  const article = async (
+    who: OpenAccount,
+    at: number,
+    args: Record<string, unknown>,
+    attachments?: Map<string, { bytes: Uint8Array; mime?: string }>
+  ): Promise<string> =>
     (
       await publish(
         who,
-        {
-          type: 'article',
-          created: at,
-          args: { headline: title, standfirst: '', body: [{ kind: 'text', text: body }], inGroup: root }
-        },
+        { type: 'article', created: at, args: { ...args, inGroup: wire }, ...(attachments ? { attachments } : {}) },
         readers
       )
     ).envelopeHash
 
-  const shouted = await post(
-    c.mary!,
-    'Ten tools every desk needs',
-    'A list. Mostly of things the author sells.',
-    T0 + 11 * DAY + 3600
+  const investigation = await article(c.katherine!, T0 + 11 * DAY + 3600, {
+    headline: 'The Harbour Yard figures do not add up',
+    standfirst:
+      'The developer’s own filings put the affordable-housing count 38 homes below what the committee was told.',
+    byline: c.katherine!.who.name,
+    publisher: 'Meridian Press',
+    published: '2026-06-12',
+    body: [
+      {
+        kind: 'paragraph',
+        text: 'The scheme approved last week was presented to councillors as delivering 72 affordable homes out of 240. The developer’s filed viability assessment, published the same afternoon, counts 34.'
+      },
+      { kind: 'heading', text: 'Where the gap is' },
+      {
+        kind: 'paragraph',
+        text: 'The difference is not a rounding error and it is not a dispute about definitions. Both documents use the same tenure categories. One counts the shared-ownership block on the eastern quay twice.'
+      },
+      {
+        kind: 'subheading',
+        text: 'What the committee was shown'
+      },
+      {
+        kind: 'paragraph',
+        text: 'The papers circulated before Tuesday’s hearing contained the higher figure and no working. Two councillors asked for the underlying schedule and were told it would follow.'
+      },
+      {
+        kind: 'paragraph',
+        text: 'It followed on Thursday, after the vote.'
+      },
+      {
+        kind: 'footnote',
+        text: 'Filed viability assessment, Harbour Yard (Phase 1), table 4.2. The borough’s copy is the one dated 3 June; an earlier draft circulated in May has different totals again.'
+      }
+    ]
+  })
+
+  const listicle = await article(c.mary!, T0 + 11 * DAY + 5400, {
+    headline: 'Ten tools every newsroom desk needs',
+    standfirst: 'Number four is a notebook.',
+    byline: c.mary!.who.name,
+    body: [
+      {
+        kind: 'paragraph',
+        text: 'Every desk runs on the same handful of things, and most of them cost nothing. Here is the list, in no particular order, except the order that suits me.'
+      },
+      { kind: 'paragraph', text: 'One: a notebook. Two: a second notebook. Three: somebody who answers the phone after six.' },
+      { kind: 'paragraph', text: 'The rest are in the affiliate links below, which is the real reason this exists.' }
+    ]
+  })
+
+  // A photograph, so an article with media is in the world rather than assumed.
+  const photo = skyline()
+  const photoEssay = await article(
+    c.alan!,
+    T0 + 11 * DAY + 7200,
+    {
+      headline: 'The crane goes in October',
+      standfirst: 'Photographing Harbour Yard before the listed crane comes down.',
+      byline: c.alan!.who.name,
+      published: '2026-06-12',
+      body: [
+        {
+          kind: 'paragraph',
+          text: 'It has been on the eastern quay since 1953 and it is coming down in October, consent or no consent. I went at dusk on the last clear evening.'
+        },
+        {
+          kind: 'image',
+          name: 'img-1',
+          alt: 'The Harbour Yard crane silhouetted against a dusk sky, lit windows behind it.',
+          caption: 'Harbour Yard, the evening before the vote.',
+          placement: 'right'
+        },
+        {
+          kind: 'paragraph',
+          text: 'The retention condition covers the structure, not the jib. Nobody at the hearing could say what that means in practice, which is roughly where the whole scheme sits.'
+        },
+        {
+          kind: 'paragraph',
+          text: 'Prints of the full set are going in the archive rather than anywhere commercial. Ask Edith.'
+        }
+      ]
+    },
+    new Map([['img-1', { bytes: new Uint8Array(photo), mime: 'image/png' }]])
   )
-  const quiet = await post(
-    c.katherine!,
-    'The Harbour Yard figures do not add up',
-    'Working through the published numbers line by line.',
-    T0 + 11 * DAY + 7200
-  )
-  const spam = await post(c.linus!, 'BUY GOLD NOW', 'Click here.', T0 + 11 * DAY + 9000)
+
+  const spam = await article(c.linus!, T0 + 11 * DAY + 9000, {
+    headline: 'BUY GOLD NOW — LIMITED WINDOW',
+    standfirst: '',
+    body: [{ kind: 'paragraph', text: 'Click here. Act fast. This will not be repeated.' }]
+  })
 
   const vote = async (who: OpenAccount, on: string, dir: 1 | -1, at: number): Promise<void> => {
     await publish(who, { type: 'vote', created: at, args: { votesOn: on, dir } }, readers)
   }
 
-  // Four keys nobody in the press has vouched for pile onto the listicle.
-  // Their raw count is the biggest number in the forum and is worth nothing.
+  // Four keys nobody in the press has vouched for pile onto the listicle. Their
+  // raw count is the biggest number in the forum and is worth nothing.
   const strangers = ['kestrel', 'marlow', 'vesper', 'quill'].map((k) => c[k]).filter(Boolean) as OpenAccount[]
   for (let i = 0; i < strangers.length; i++) {
-    await vote(strangers[i]!, shouted, 1, T0 + 11 * DAY + 10_000 + i * 60)
+    await vote(strangers[i]!, listicle, 1, T0 + 11 * DAY + 10_000 + i * 60)
   }
-  // Two colleagues -- people Ada actually vouched for -- prefer the other one.
-  await vote(c.grace!, quiet, 1, T0 + 11 * DAY + 11_000)
-  await vote(c.alan!, quiet, 1, T0 + 11 * DAY + 11_100)
-  await vote(c.katherine!, shouted, -1, T0 + 11 * DAY + 11_200)
+  // People Ada actually vouched for prefer the reporting.
+  await vote(c.grace!, investigation, 1, T0 + 11 * DAY + 11_000)
+  await vote(c.alan!, investigation, 1, T0 + 11 * DAY + 11_100)
+  await vote(c.joan!, investigation, 1, T0 + 11 * DAY + 11_150)
+  await vote(c.katherine!, listicle, -1, T0 + 11 * DAY + 11_200)
+  await vote(c.dorothy!, photoEssay, 1, T0 + 11 * DAY + 11_300)
+  await vote(c.grace!, photoEssay, 1, T0 + 11 * DAY + 11_350)
 
-  // A thread, so replies have somewhere to nest.
-  const r1 = (
-    await publish(
-      c.alan!,
-      {
-        type: 'comment',
-        created: T0 + 11 * DAY + 12_000,
-        args: { body: 'Which figures exactly? The Q2 ones were restated.', replyTo: quiet, inGroup: root }
-      },
-      readers
-    )
-  ).envelopeHash
-  const r2 = (
-    await publish(
-      c.katherine!,
-      {
-        type: 'comment',
-        created: T0 + 11 * DAY + 13_000,
-        args: { body: 'Both. The restatement is the part that does not reconcile.', replyTo: r1, inGroup: root }
-      },
-      readers
-    )
-  ).envelopeHash
-  await publish(
-    c.grace!,
-    {
-      type: 'comment',
-      created: T0 + 11 * DAY + 14_000,
-      args: { body: 'Worth a follow-up. Filing it.', replyTo: r2, inGroup: root }
-    },
-    readers
+  // ── A discussion worth threading ─────────────────────────────────────────
+  const reply = async (
+    who: OpenAccount,
+    to: string,
+    body: string,
+    at: number,
+    group = wire
+  ): Promise<string> =>
+    (
+      await publish(who, { type: 'comment', created: at, args: { body, replyTo: to, inGroup: group } }, readers)
+    ).envelopeHash
+
+  const q1 = await reply(
+    c.alan!,
+    investigation,
+    'Which filing exactly? The Q2 assessment was restated in May and the borough’s copy is the later one.',
+    T0 + 11 * DAY + 12_000
+  )
+  const q1a = await reply(
+    c.katherine!,
+    q1,
+    'Both, and that is the point. The May draft says 41, the June one says 34, and the committee papers say 72. Only one of those was in front of anybody who voted.',
+    T0 + 11 * DAY + 12_600
+  )
+  const q1b = await reply(
+    c.dorothy!,
+    q1a,
+    'Checked the June filing against the tenure schedule this morning. The eastern quay block is in there twice — once as shared ownership, once as intermediate rent. Same 19 units.',
+    T0 + 11 * DAY + 13_200
+  )
+  await reply(
+    c.alan!,
+    q1b,
+    'That accounts for the whole gap then. Worth putting the schedule itself up as an attachment.',
+    T0 + 11 * DAY + 13_800
+  )
+  const q2 = await reply(
+    c.joan!,
+    investigation,
+    'Has anyone put this to the developer? A line from them before this runs would save an awkward correction after.',
+    T0 + 11 * DAY + 14_400
+  )
+  await reply(
+    c.katherine!,
+    q2,
+    'Asked on Wednesday. No reply yet. Running it Friday either way, with the gap in the standfirst.',
+    T0 + 11 * DAY + 15_000
+  )
+  await reply(
+    c.edith!,
+    photoEssay,
+    'The 1953 date is from the harbour board minutes, not the listing. The listing says 1955 and is wrong.',
+    T0 + 11 * DAY + 15_600
   )
 
-  // Grace moderates the spam. A verdict, not a deletion: every library still
-  // holds the post, and every reader can press "show anyway".
+  // Votes on the COMMENTS, not only the posts — so a thread has an order too,
+  // and the same tribe weighting decides it.
+  await vote(c.katherine!, q1b, 1, T0 + 11 * DAY + 16_000)
+  await vote(c.grace!, q1b, 1, T0 + 11 * DAY + 16_100)
+  await vote(c.ada!, q1b, 1, T0 + 11 * DAY + 16_150)
+  await vote(c.alan!, q2, 1, T0 + 11 * DAY + 16_200)
+  for (let i = 0; i < strangers.length; i++) {
+    await vote(strangers[i]!, q1, 1, T0 + 11 * DAY + 16_300 + i * 30)
+  }
+
+  // ── Moderation: both verdicts ────────────────────────────────────────────
+  // Hidden, not deleted. Every library still holds it and every reader can
+  // press "show anyway" — which is the difference between a forum and a
+  // memory hole.
   await publish(
     c.grace!,
     {
       type: 'attestation',
-      created: T0 + 11 * DAY + 15_000,
+      created: T0 + 11 * DAY + 17_000,
       args: {
         attests: spam,
-        inGroup: root,
+        inGroup: wire,
         verdict: 'hide',
         statement: 'Off topic and selling something.'
       }
     },
     readers
   )
+  await publish(
+    c.grace!,
+    {
+      type: 'attestation',
+      created: T0 + 11 * DAY + 17_600,
+      args: {
+        attests: investigation,
+        inGroup: wire,
+        verdict: 'endorse',
+        statement: 'Checked against the filings. Desk stands behind this one.'
+      }
+    },
+    readers
+  )
 
-  // Somebody outside asks to get in. Nobody has admitted them, so it stays
-  // pending -- which the roster, not a flag, is what decides.
+  // Somebody outside asks to get in. It stays pending because the ROSTER is
+  // what decides, and nobody has written them into one.
   if (c.kestrel) {
     await publish(
       c.kestrel,
       {
         type: 'join-request',
-        created: T0 + 11 * DAY + 16_000,
-        args: { inGroup: root, calledMe: c.kestrel.who.name, say: 'I file on shipping. Would like in.' }
+        created: T0 + 11 * DAY + 18_000,
+        args: {
+          inGroup: wire,
+          calledMe: c.kestrel.who.name,
+          say: 'I file on shipping and harbour freight. Happy to start on the quiet stuff.'
+        }
       },
       readers
     )
   }
 
-  log('  forum: the wire — 3 posts, a 3-deep thread, one hidden by Grace, one asking to join')
-  log(`         ranking differs by reader: pnpm world show ada  vs  pnpm world show linus`)
+  // ── A second forum, so "which communities am I in" is a real question ────
+  // Different keeper, different moderator, different roster: Ada is not on it,
+  // and the Forums window has to say so.
+  const tenants = (
+    await publish(
+      c.thurgood!,
+      {
+        type: 'group',
+        created: T0 + 11 * DAY + 19_000,
+        args: {
+          name: 'Vale Street tenants',
+          purpose: 'The building, the lease, and anything the landlord has not answered.',
+          members: [
+            member(c.thurgood!, 'founder'),
+            member(c.sandra!, 'moderator'),
+            member(c.ruth!, 'member'),
+            member(c.clara!, 'member'),
+            member(c.ada!, 'member')
+          ],
+          notes: ''
+        }
+      },
+      [c.thurgood!, c.sandra!, c.ruth!, c.clara!, c.ada!, c.linus!]
+    )
+  ).envelopeHash
+
+  const lawReaders = [c.thurgood!, c.sandra!, c.ruth!, c.clara!, c.ada!, c.linus!]
+  const notice = (
+    await publish(
+      c.sandra!,
+      {
+        type: 'article',
+        created: T0 + 11 * DAY + 20_000,
+        args: {
+          headline: 'Service charge statement is nine weeks late',
+          standfirst: 'The lease says twenty-eight days after year end. It is now sixty-three.',
+          byline: c.sandra!.who.name,
+          inGroup: tenants,
+          body: [
+            {
+              kind: 'paragraph',
+              text: 'Clause 6.4 requires the statement within twenty-eight days of the accounting year end. Nobody has had one.'
+            },
+            {
+              kind: 'paragraph',
+              text: 'Until it arrives the sinking-fund demand is not payable. Pay it if you like, but you are not obliged to, and paying it makes the next one harder to argue.'
+            }
+          ]
+        }
+      },
+      lawReaders
+    )
+  ).envelopeHash
+  await publish(
+    c.ruth!,
+    {
+      type: 'comment',
+      created: T0 + 11 * DAY + 20_600,
+      args: { body: 'Mine came on Tuesday. Dated March. Posted last week.', replyTo: notice, inGroup: tenants }
+    },
+    lawReaders
+  )
+  await publish(
+    c.clara!,
+    {
+      type: 'vote',
+      created: T0 + 11 * DAY + 20_800,
+      args: { votesOn: notice, dir: 1 }
+    },
+    lawReaders
+  )
+  await publish(
+    c.ruth!,
+    { type: 'vote', created: T0 + 11 * DAY + 20_900, args: { votesOn: notice, dir: 1 } },
+    lawReaders
+  )
+
+  // ── One post too big to travel inline ────────────────────────────────────
+  // Over the relay's 32 KiB inline cap, so an event about it carries a hash and
+  // a locator instead of the bundle. Everyone on the wire gets the thing; Linus
+  // -- who is not on the roster and reads it from outside -- gets the OFFER
+  // that a relay would have given him.
+  //
+  // STAGED: the bytes are put in his seed store and the locator is
+  // `bundle:<tar-hash>`, so pressing Fetch resolves offline and the whole
+  // offer → press → admit → appears path can be watched without a swarm. Over a
+  // real relay the locator would be a magnet and the bytes would come from
+  // whoever is seeding.
+  const heavy = await author(c.alan!, {
+    type: 'article',
+    created: T0 + 11 * DAY + 21_000,
+    args: {
+      headline: 'Harbour Yard: the full plate set',
+      standfirst: 'Forty exposures from the last week of the crane, at print resolution.',
+      byline: c.alan!.who.name,
+      inGroup: wire,
+      body: [
+        {
+          kind: 'paragraph',
+          text: 'The whole set, unedited, because the archive wants the negatives and the archive is right.'
+        },
+        {
+          kind: 'image',
+          name: 'img-1',
+          alt: 'The crane at dusk.',
+          caption: 'Plate 1 of 40.',
+          placement: 'full'
+        }
+      ]
+    },
+    attachments: new Map([
+      ['img-1', { bytes: new Uint8Array(photo), mime: 'image/png' }],
+      // Ballast: incompressible, so the bundle really is over the cap rather
+      // than merely looking it.
+      ['plates.raw', { bytes: new Uint8Array(ballast(48 * 1024)), mime: 'application/octet-stream' }]
+    ])
+  })
+  const heavyHash = deliver(heavy, press).envelopeHash
+  const tarHash = c.linus!.seeds.put(heavy)
+  c.linus!.library.recordOffer({
+    envelopeHash: heavyHash,
+    locator: `bundle:${tarHash}`,
+    relayUrl: 'wss://relay.example',
+    poster: 'f'.repeat(64),
+    type: 'article',
+    inGroup: wire,
+    replyTo: null,
+    now: T0 * 1000 + 11 * DAY * 1000 + 21_500
+  })
+
+  log(`  forum: the wire — 5 posts (one with a photograph), a 4-deep thread, votes on comments,`)
+  log(`         one hidden and one endorsed, one asking to join`)
+  log(`  forum: Vale Street tenants — a second community, with a different roster`)
+  log(`  offer: ${c.linus!.who.name} sees the oversize plate set as a pointer, not a post`)
+  log(`         ranking differs by reader: pnpm world forum --as ada --vs linus`)
 }
 
 /** An invoice, so there is one to look at. Money is in minor units and
@@ -539,12 +819,21 @@ async function everyday(c: Cast, log: (s: string) => void): Promise<void> {
     },
     press
   )
+  // A poster with an actual photograph on it. It shipped with `photos: []`,
+  // which is a poster of nothing -- the program falls back to an attachment
+  // named `image`, and there was no attachment either.
   await publish(
     c.mary!,
     {
       type: 'poster',
       created: T0 + 12 * DAY,
-      args: { title: 'The crane at dusk', caption: 'Harbour Yard, the evening before the vote.', layout: 'auto', photos: [] }
+      args: {
+        title: 'The crane at dusk',
+        caption: 'Harbour Yard, the evening before the vote.',
+        layout: 'auto',
+        photos: [{ name: 'image', alt: 'The Harbour Yard crane against a dusk sky.', caption: 'Plate 1 of 40.' }]
+      },
+      attachments: new Map([['image', { bytes: new Uint8Array(posterArt()), mime: 'image/png' }]])
     },
     press
   )

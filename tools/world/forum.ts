@@ -80,13 +80,24 @@ interface Listing {
     votes: { score: number; tribeScore: number; up: number; down: number; tribeUp: number; tribeDown: number }
     replies: number
     verdict: { verdict: string; byName: string; why: string } | null
+    /** Set when this is an OFFER: a thing a relay said exists that this
+     *  library does not hold, ranked beside the posts it competes with. */
+    offered?: boolean
   }[]
   tribeEmpty: boolean
 }
 
-async function listingFor(inst: Instance): Promise<{ name: string; root: string; listing: Listing } | null> {
+async function listingFor(
+  inst: Instance,
+  want: string
+): Promise<{ name: string; root: string; listing: Listing } | null> {
   const forums = await hook<{ root: string; name: string; posts: number }[]>(inst, 'return shell.forums()')
-  const pick = forums.find((f) => f.posts > 0) ?? forums[0]
+  // Busiest by default. "The first one with posts" was fine with one forum and
+  // silently picked the wrong one the moment there were two.
+  const matching = want
+    ? forums.filter((f) => f.name.toLowerCase().includes(want.toLowerCase()))
+    : [...forums].sort((a, b) => b.posts - a.posts)
+  const pick = matching[0]
   if (!pick) return null
   const listing = await hook<Listing>(inst, `return shell.forumListing(${JSON.stringify(pick.root)})`)
   return { name: pick.name, root: pick.root, listing }
@@ -105,11 +116,18 @@ function render(who: WorldAccount, listing: Listing): void {
   }
   listing.rows.forEach((r, i) => {
     const tribe = r.votes.tribeUp + r.votes.tribeDown
-    const flag = r.verdict?.verdict === 'hide' ? `  [hidden by ${r.verdict.byName}: ${r.verdict.why}]` : ''
+    const flag =
+      r.verdict?.verdict === 'hide'
+        ? `  [hidden by ${r.verdict.byName}: ${r.verdict.why}]`
+        : r.verdict?.verdict === 'endorse'
+          ? `  [endorsed by ${r.verdict.byName}]`
+          : ''
+    // An offer ranks with the posts but is not one: nobody here has read it.
+    const held = r.offered ? '  ← OFFERED, not fetched' : ''
     log(
       `     ${i + 1}. ${label(r).padEnd(24)}` +
         ` score ${String(r.votes.score).padStart(3)} · ${String(tribe).padStart(2)} from your tribe` +
-        `${flag}`
+        `${flag}${held}`
     )
   })
 }
@@ -122,6 +140,7 @@ export async function runForum(argv: string[]): Promise<void> {
   const roster = deriveRoster()
   const a = bySlug(roster, flag('as', 'ada'))
   const b = bySlug(roster, flag('vs', 'linus'))
+  const want = flag('forum', '')
   if (a.slug === b.slug) throw new Error('--as and --vs must be different accounts')
   assertNotLive(a.slug)
   assertNotLive(b.slug)
@@ -136,8 +155,8 @@ export async function runForum(argv: string[]): Promise<void> {
     const second = await launch(b)
     started.push(second)
 
-    const one = await listingFor(first)
-    const two = await listingFor(second)
+    const one = await listingFor(first, want)
+    const two = await listingFor(second, want)
     if (!one || !two) {
       log('No forum with posts in one of those libraries — run `pnpm world seed` first.')
       process.exitCode = 1
