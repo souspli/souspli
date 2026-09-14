@@ -164,6 +164,8 @@ function usage(): void {
   log('                        the same forum, ranked in two libraries')
   log('  relay  [--from ada] [--to grace] [--relay wss://…]')
   log('                        post a thing on one; receive it on the other, unasked')
+  log('                        --big posts over the inline cap, so it travels as a')
+  log('                        pointer and has to be fetched on purpose')
   log('  reset                 delete world/ entirely')
 }
 

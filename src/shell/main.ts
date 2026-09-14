@@ -340,6 +340,10 @@ interface ShellSurface {
   newForumPost?: (rootHash: string, starterKey?: string) => Record<string, unknown>
   requestJoin?: (rootHash: string) => Record<string, unknown>
   newVerdict?: (targetHash: string, rootHash: string, verdict: string) => Record<string, unknown>
+  /** Things a relay says exist that this library does not hold. */
+  offers?: (inGroup?: string) => Record<string, unknown>[]
+  /** Follow one. The press — nothing else in the shell calls this. */
+  fetchOffer?: (envelopeHash: string) => Promise<Record<string, unknown>>
   /** Relay connections and how far the subscription has read. */
   relays?: () => Record<string, unknown>
   addRelay?: (url: string) => Record<string, unknown>
@@ -463,7 +467,11 @@ app.whenReady().then(async () => {
     return
   }
   dbg('library')
-  const library = new Library(join(userDataDir, 'library'))
+  const library = new Library(join(userDataDir, 'library'), {
+    // How many unfetched offers to keep. A relay can advertise pointers
+    // forever and this is the one table that becomes disk.
+    maxOffers: numEnv('SHELL_MAX_OFFERS', 500)
+  })
   dbg('admission')
   const admission = new AdmissionService({ limits: limitsFromEnv() })
   // Seed store: retains every admitted bundle's raw tar bytes (content-addressed
@@ -718,8 +726,24 @@ app.whenReady().then(async () => {
   }
 
   // ── Core operations (shared by IPC handlers and test hooks) ────────────────
-  async function ingestBytes(raw: Uint8Array): Promise<Record<string, unknown>> {
+  /** Admit bytes and put them in the library.
+   *
+   *  `expect` is the hash the bytes were supposed to be. It exists for the
+   *  fetch-a-pointer path: a relay advertised hash X, and what came back must
+   *  BE X. A validly signed other thing is still a refusal -- the human asked
+   *  for one thing, and quietly keeping a different one because it happened to
+   *  verify is not what they asked for. So the check runs before the store,
+   *  and on a mismatch nothing is kept at all. */
+  async function ingestBytes(raw: Uint8Array, expect?: string): Promise<Record<string, unknown>> {
     const result = await admission.admit(raw, keyring.unsealer)
+    if (result.status === 'valid' && expect !== undefined && hex(result.envelopeHash) !== expect) {
+      return {
+        status: 'invalid',
+        reason: `this is a different thing: asked for ${expect.slice(0, 12)}…, got ${hex(result.envelopeHash).slice(0, 12)}…`,
+        expected: expect,
+        got: hex(result.envelopeHash)
+      }
+    }
     if (result.status === 'valid') {
       // Whether the envelope was NEW matters to the caller: a bundle you
       // already hold is admitted and valid, but nothing was added, and a
@@ -730,6 +754,10 @@ app.whenReady().then(async () => {
       const stored = library.store(result, Date.now())
       // Seed the raw admitted bundle so it can be re-served by bundle:<hash>.
       seedStore.put(raw)
+      // Whatever route it took, holding it settles any offer of it. A pointer
+      // fetched, a file dropped in, a bundle pasted -- all the same once the
+      // thing is here.
+      library.dropOffer(hex(result.envelopeHash))
       notifyFeedChanged()
       return { ...summarize(result), duplicate: !stored.inserted }
     }
@@ -1672,6 +1700,41 @@ app.whenReady().then(async () => {
           verdict: verdictOn(r.envelopeHash, rootHash, mods)
         }
       })
+    // Offers rank beside posts. A vote points at a HASH, so it counts whether
+    // or not you hold the thing -- which means a large post with votes from
+    // your tribe rises to the top and asks to be fetched, instead of sitting
+    // invisible at the bottom because nobody has pulled it yet.
+    //
+    // Everything on an offer row except the votes is the poster's claim: the
+    // type, the forum, and that it exists at all. There is no author until it
+    // is fetched, and the chrome must not invent one.
+    for (const o of library.offers({ inGroup: rootHash })) {
+      rows.push({
+        envelopeHash: o.envelopeHash,
+        authorScheme: '',
+        authorKey: '',
+        type: o.type || 'thing',
+        progHash: '',
+        manifestHash: '',
+        receivedAt: o.seenAt,
+        created: 0,
+        path: null,
+        seq: null,
+        sealed: false,
+        read: false,
+        isFork: false,
+        offered: true,
+        offerState: o.state,
+        offerReason: o.reason,
+        locator: o.locator,
+        poster: o.poster,
+        relayUrl: o.relayUrl,
+        authorHops: null,
+        votes: voteFacts(o.envelopeHash, tribe) as Record<string, number>,
+        replies: library.countRefsTo(o.envelopeHash),
+        verdict: verdictOn(o.envelopeHash, rootHash, mods)
+      } as unknown as (typeof rows)[number])
+    }
     rows.sort((a, b) => {
       const at = (a.votes as Record<string, number>).tribeScore ?? 0
       const bt = (b.votes as Record<string, number>).tribeScore ?? 0
@@ -2218,9 +2281,19 @@ app.whenReady().then(async () => {
       const bytes = new Uint8Array(await file.arrayBuffer())
       seeder.setDownloadState(id, 'admitting')
       pushTransfers()
-      const outcome = await ingestBytes(bytes)
+      // Started to discharge an offer? Then it owes THAT thing. The expectation
+      // lives in the offers table rather than in this closure, so a transfer
+      // resumed on the next launch still has to deliver what it was started
+      // for -- a magnet is a locator a stranger chose, and the swarm behind it
+      // can serve whatever it likes.
+      const owed = library.offerForTransfer(id)
+      const outcome = await ingestBytes(bytes, owed?.envelopeHash)
       if (outcome.status !== 'valid') {
         seeder.setDownloadState(id, 'failed', `admission refused it: ${String(outcome.reason ?? outcome.status)}`)
+        if (owed) {
+          library.setOfferState(owed.envelopeHash, 'failed', String(outcome.reason ?? outcome.status))
+          notifyFeedChanged()
+        }
         pushTransfers()
         return
       }
@@ -2408,9 +2481,29 @@ app.whenReady().then(async () => {
    *  every way of being done with an event -- including the early returns --
    *  advances it exactly once, and only after the work is actually done. */
   async function handleRelayThing(ev: ParsedThingEvent, url: string): Promise<void> {
-    // A pointer rather than an inline bundle: fetching those is the next slice,
-    // so record nothing rather than pretending to have it.
-    if (!ev.bundle) return
+    // A pointer rather than an inline bundle. Recorded as an OFFER and
+    // deliberately not followed: this is the first thing in the shell that
+    // could make the machine download because a stranger said to, and it does
+    // not. Nothing is contacted until a human presses Fetch.
+    if (!ev.bundle) {
+      if (!ev.fetchLocator) return
+      if (!followable(ev.fetchLocator)) {
+        record({ type: 'offer-refused', hash: ev.envelopeHash, reason: 'locator scheme not followable from a relay' })
+        return
+      }
+      const noted = library.recordOffer({
+        envelopeHash: ev.envelopeHash,
+        locator: ev.fetchLocator,
+        relayUrl: url,
+        poster: ev.event.pubkey,
+        type: ev.type,
+        inGroup: ev.group,
+        replyTo: ev.replyTo,
+        now: Date.now()
+      })
+      if (noted) notifyFeedChanged()
+      return
+    }
     const held = library.get(ev.envelopeHash) !== null
     if (!held) {
       const outcome = await ingestBytes(ev.bundle)
@@ -2469,6 +2562,92 @@ app.whenReady().then(async () => {
     const removed = library.removeRelay(url)
     nostr.disconnect(url)
     return { removed, relays: nostr.status() }
+  }
+
+  // ── Offers: following a pointer ────────────────────────────────────────────
+  // An event over the inline cap carries a hash and a locator instead of bytes.
+  // Following one is the only fetch in the shell that a STRANGER can propose,
+  // so it is the only one gated on a press: an offer sits in the feed, naming
+  // what it is and where it would come from, until somebody asks for it.
+
+  /** Locators a relay is allowed to name.
+   *
+   *  `file:` is excluded deliberately. A relay advertising `file:/etc/passwd`
+   *  would make the shell read a path a stranger chose. Admission would refuse
+   *  whatever came back, so nothing could be ingested -- but the read itself
+   *  happened, and whether it succeeded is observable. A remote advertiser has
+   *  no business naming local paths, and this is cheap now and impossible to
+   *  retrofit once something relies on it. */
+  function followable(locator: string): boolean {
+    const l = locator.trim()
+    // A magnet is NOT a transport locator -- it is a background transfer, and
+    // the transport service has never known about it (see fetchNameOrLocator,
+    // which routes magnets away before dispatching). Asking `supports` about
+    // one therefore answers no, which would quietly make every pointer over
+    // the inline cap unfollowable: exactly the case pointers exist for.
+    if (/^magnet:/i.test(l)) return infoHashOf(l) !== null
+    return /^(https?:|bundle:)/i.test(l) && transport.supports(l)
+  }
+
+  /** Everything a relay has offered that this library does not hold. */
+  function offerList(inGroup?: unknown): Record<string, unknown>[] {
+    const q = typeof inGroup === 'string' && HEX64.test(inGroup) ? { inGroup } : {}
+    return library.offers(q).map((o) => ({ ...o }))
+  }
+
+  /** Fetch an offered thing. THE PRESS: nothing calls this on its own.
+   *
+   *  Whatever comes back must admit to the hash that was advertised. A magnet
+   *  becomes a background transfer that verifies when it lands; everything
+   *  else is fetched and checked here. */
+  async function fetchOffer(envelopeHash: unknown): Promise<Record<string, unknown>> {
+    if (typeof envelopeHash !== 'string' || !HEX64.test(envelopeHash)) return { error: 'bad hash' }
+    if (library.get(envelopeHash)) {
+      library.dropOffer(envelopeHash)
+      return { status: 'valid', duplicate: true }
+    }
+    const offer = library.offer(envelopeHash)
+    if (!offer) return { error: 'nothing is offering that' }
+    // Re-checked at the press, not only when it was recorded: the row could
+    // have come from an older version, or a database somebody edited.
+    if (!followable(offer.locator)) {
+      library.setOfferState(envelopeHash, 'failed', 'that locator cannot be followed from a relay')
+      notifyFeedChanged()
+      return { error: 'that locator cannot be followed from a relay' }
+    }
+
+    if (/^magnet:/i.test(offer.locator.trim())) {
+      const started = await startTransfer(offer.locator.trim())
+      if (started.status !== 'started') {
+        library.setOfferState(envelopeHash, 'failed', String(started.reason ?? 'could not start'))
+        notifyFeedChanged()
+        return started
+      }
+      // The transfer holds the expectation, so a resume after a restart still
+      // knows which thing it was started to get.
+      library.setOfferState(envelopeHash, 'fetching', '', String(started.transferId))
+      notifyFeedChanged()
+      return started
+    }
+
+    library.setOfferState(envelopeHash, 'fetching')
+    notifyFeedChanged()
+    let bytes: Uint8Array
+    try {
+      bytes = await transport.fetch(offer.locator.trim())
+    } catch (e) {
+      library.setOfferState(envelopeHash, 'failed', `transport: ${(e as Error).message}`)
+      notifyFeedChanged()
+      return { status: 'invalid', reason: `transport: ${(e as Error).message}` }
+    }
+    const outcome = await ingestBytes(bytes, envelopeHash)
+    if (outcome.status !== 'valid') {
+      library.setOfferState(envelopeHash, 'failed', String(outcome.reason ?? outcome.status))
+      notifyFeedChanged()
+      return outcome
+    }
+    // ingestBytes drops the offer once the thing is held.
+    return outcome
   }
 
   /** Send a thing to every connected relay. Deliberately an explicit act:
@@ -2892,6 +3071,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('shell:in-group', (_e, h: unknown) =>
     typeof h === 'string' && HEX64.test(h) ? inGroupOf(h) : null
   )
+  ipcMain.handle('shell:offers', (_e, g: unknown) => offerList(g))
+  ipcMain.handle('shell:fetch-offer', async (_e, h: unknown) => await fetchOffer(h))
   ipcMain.handle('shell:relays', () => relayState())
   ipcMain.handle('shell:relay-add', (_e, url: unknown) => addRelay(url))
   ipcMain.handle('shell:relay-remove', (_e, url: unknown) => removeRelay(url))
@@ -2929,6 +3110,8 @@ app.whenReady().then(async () => {
   shell.newForumPost = (h, key) => newForumPost(h, key)
   shell.requestJoin = (h) => requestJoin(h)
   shell.newVerdict = (h, g, v) => newVerdict(h, g, v)
+  shell.offers = (g) => offerList(g)
+  shell.fetchOffer = (h) => fetchOffer(h)
   shell.relays = () => relayState()
   shell.addRelay = (url) => addRelay(url)
   shell.removeRelay = (url) => removeRelay(url)

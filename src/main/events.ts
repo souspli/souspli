@@ -44,6 +44,7 @@ export type CageEvent =
   | { type: 'transfer-resume-failed'; id: string; reason: string }
   | { type: 'relay-mismatch'; advertised: string; got: string }
   | { type: 'relay-refused'; relay: string; hash: string; reason: string }
+  | { type: 'offer-refused'; hash: string; reason: string }
 
 /** TEST-ONLY payload capture. A separate buffer that DOES retain emit payloads
  *  so the Playwright suite can assert on them. Populated only when

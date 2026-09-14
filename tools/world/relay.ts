@@ -84,6 +84,7 @@ export async function runRelay(argv: string[]): Promise<void> {
   const to = bySlug(roster, flag('to', 'grace'))
   const timeoutMs = Number.parseInt(flag('timeout', '60000'), 10)
   const relayFlag = flag('relay', '')
+  const big = argv.includes('--big')
   if (from.slug === to.slug) throw new Error('--from and --to must be different accounts')
   assertNotLive(from.slug)
   assertNotLive(to.slug)
@@ -139,10 +140,18 @@ export async function runRelay(argv: string[]): Promise<void> {
 
     // A FRESH thing: posting something the reader already holds would prove
     // nothing, since it would "arrive" out of its own library.
+    //
+    // With --big it carries an attachment over the 32 KiB inline cap, so the
+    // event travels as a POINTER instead of carrying the bundle. That is the
+    // other half of the relay story: the reader gets a note saying a thing
+    // exists, and nothing is downloaded until somebody presses Fetch.
     const nametag = readFileSync(join(REPO_ROOT, 'samples', 'nametag.html')).toString('base64')
+    const attachments = big
+      ? `, [{ name: 'payload.bin', base64: ${JSON.stringify(Buffer.alloc(64 * 1024, 7).toString('base64'))}, mime: 'application/octet-stream' }]`
+      : ''
     const composed = await hook<{ outcome: Record<string, unknown> }>(
       poster,
-      `return shell.compose(${JSON.stringify(nametag)}, 'relay-test')`
+      `return shell.compose(${JSON.stringify(nametag)}, 'relay-test'${attachments})`
     )
     const hash = composed.outcome.envelopeHash as string
     if (composed.outcome.status !== 'valid') {
@@ -158,6 +167,18 @@ export async function runRelay(argv: string[]): Promise<void> {
     if (local && local.received.length > 0) throw new Error('something reached the relay without being posted')
     log(`${to.slug} does not hold it, and nothing has been posted yet`)
 
+    // A pointer is only honest if something is actually serving it, so the
+    // poster seeds before posting. postToRelays refuses an oversize thing that
+    // is not seeded, rather than advertising a locator nobody answers.
+    if (big) {
+      const seeded = await hook<{ magnet?: string; error?: string }>(
+        poster,
+        `return shell.seedStart(${JSON.stringify(hash)})`
+      )
+      if (!seeded.magnet) throw new Error(`seeding failed: ${seeded.error ?? 'unknown'}`)
+      log(`seeding: ${seeded.magnet.slice(0, 72)}…`)
+    }
+
     const posted = await hook<Record<string, unknown>>(poster, `return shell.postToRelays(${JSON.stringify(hash)})`)
     if (posted.error) throw new Error(`posting failed: ${String(posted.error)}`)
     log('')
@@ -166,6 +187,47 @@ export async function runRelay(argv: string[]): Promise<void> {
 
     const startedAt = Date.now()
     const deadline = Date.now() + timeoutMs
+
+    if (big) {
+      // It must NOT arrive on its own. Waiting for the offer proves the event
+      // got there; the feed staying empty proves nothing was downloaded.
+      log('')
+      log('waiting for the OFFER (nothing should be fetched yet)…')
+      let offered = false
+      while (Date.now() < deadline) {
+        const offers = await hook<{ envelopeHash: string; locator: string; state: string }[]>(
+          reader,
+          'return shell.offers()'
+        )
+        const o = offers.find((x) => x.envelopeHash === hash)
+        if (o) {
+          offered = true
+          log(`  offered: ${o.state} — ${o.locator.slice(0, 72)}…`)
+          break
+        }
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      if (!offered) {
+        log('')
+        log('FAILED: the pointer never turned up as an offer.')
+        process.exitCode = 1
+        return
+      }
+      if (await hook<boolean>(reader, held)) {
+        log('')
+        log('FAILED: it was fetched WITHOUT anyone pressing Fetch. That is the whole')
+        log('property this path exists to protect.')
+        process.exitCode = 1
+        return
+      }
+      log('  nothing downloaded — as it should not be')
+      log('')
+      log('pressing Fetch…')
+      const r = await hook<Record<string, unknown>>(reader, `return shell.fetchOffer(${JSON.stringify(hash)})`)
+      if (r.error) throw new Error(`fetch refused: ${String(r.error)}`)
+      if (r.status === 'started') log(`  transfer started (${String(r.transferId).slice(0, 8)}…)`)
+    }
+
     let arrived = false
     for (;;) {
       if (await hook<boolean>(reader, held)) {

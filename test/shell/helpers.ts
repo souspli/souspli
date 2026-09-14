@@ -213,6 +213,10 @@ export interface ShellHandle {
   seedStart(envelopeHash: string): Promise<Record<string, unknown>>
   seedStop(envelopeHash: string): Promise<Record<string, unknown>>
   seedStatus(): Promise<Record<string, unknown>[]>
+  /** Things a relay says exist that this library does not hold, and the press
+   *  that fetches one. Nothing follows a pointer on its own. */
+  offers(inGroup?: string): Promise<Record<string, unknown>[]>
+  fetchOffer(envelopeHash: string): Promise<Record<string, unknown>>
   /** Votes: cast one, and read what the votes on a thing are worth. */
   vote(envelopeHash: string, dir: 1 | -1): Promise<Record<string, unknown>>
   votes(envelopeHash: string): Promise<Record<string, number>>
@@ -517,6 +521,19 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
         const s = (electron.app as unknown as { __shell: { seedStatus: () => Record<string, unknown>[] } }).__shell
         return s.seedStatus() as never
       }),
+    offers: (inGroup?: string) =>
+      app.evaluate(async (electron, g) => {
+        const s = (electron.app as unknown as { __shell: { offers: (g?: string) => Record<string, unknown>[] } })
+          .__shell
+        return s.offers(g) as never
+      }, inGroup),
+    fetchOffer: (envelopeHash: string) =>
+      app.evaluate(async (electron, h) => {
+        const s = (
+          electron.app as unknown as { __shell: { fetchOffer: (h: string) => Promise<Record<string, unknown>> } }
+        ).__shell
+        return s.fetchOffer(h)
+      }, envelopeHash),
     vote: (envelopeHash: string, dir: 1 | -1) =>
       app.evaluate(
         async (electron, a) => {

@@ -29,6 +29,8 @@ interface ShellApi {
   seedStart(envelopeHash: string): Promise<{ magnet?: string; error?: string }>
   seedStop(envelopeHash: string): Promise<{ stopped: boolean }>
   seedStatus(): Promise<{ envelopeHash: string; magnet: string; peers: number; bytes: number; type: string }[]>
+  offers(inGroup?: string): Promise<OfferRow[]>
+  fetchOffer(envelopeHash: string): Promise<Record<string, unknown>>
   vote(envelopeHash: string, dir: 1 | -1): Promise<Record<string, unknown>>
   votes(envelopeHash: string): Promise<Record<string, number>>
   thread(envelopeHash: string): Promise<{ rows: Record<string, unknown>[]; count: number }>
@@ -120,6 +122,21 @@ interface ThingRow {
   /** Only on a rolled-up feed: what folded into this row — the whole reply
    *  subtree, and the votes cast on it. */
   activity?: { replies: number; up: number; down: number }
+}
+/** A thing a relay says exists that you do not hold — a draft in reverse.
+ *  Everything here except the hash is the poster's CLAIM, and there is
+ *  deliberately no author: nobody has read the envelope yet. */
+interface OfferRow {
+  envelopeHash: string
+  locator: string
+  relayUrl: string
+  poster: string
+  type: string
+  inGroup: string | null
+  replyTo: string | null
+  state: 'offered' | 'fetching' | 'failed'
+  reason: string
+  seenAt: number
 }
 interface KnownTypeEntry {
   key: string
@@ -1130,6 +1147,64 @@ function thingItem(row: ThingRow): HTMLElement {
   return item
 }
 
+/** One offered thing: a stub for something a relay says exists.
+ *
+ *  The mirror of a draft row, and the wording carries the whole difference
+ *  between this and a real feed row. Nothing here is verified: the type is the
+ *  poster's label, and there is NO author, because the only key in the event is
+ *  the one that posted it and posting is not authoring.
+ *
+ *  Fetch is the press. It is the entire security boundary of this feature: the
+ *  locator is shown beside it because pressing it is what contacts that
+ *  address. */
+function offerItem(o: OfferRow): HTMLElement {
+  const wrap = el('div', 'sh-offer')
+  wrap.setAttribute('data-testid', 'offer-item')
+  wrap.setAttribute('data-envelope-hash', o.envelopeHash)
+  wrap.setAttribute('data-state', o.state)
+
+  const line = el('div', 'sh-feed-line')
+  line.append(el('span', 'evm-badge evm-badge--neutral', o.type || 'thing'))
+  const claim = el('span', 'sh-offer-claim', 'offered — not fetched')
+  line.append(claim)
+  const fetchBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm sh-offer-fetch', 'Fetch') as HTMLButtonElement
+  fetchBtn.setAttribute('data-testid', 'offer-fetch')
+  fetchBtn.disabled = o.state === 'fetching'
+  if (o.state === 'fetching') fetchBtn.textContent = 'Fetching…'
+  fetchBtn.addEventListener('click', async () => {
+    fetchBtn.disabled = true
+    fetchBtn.textContent = 'Fetching…'
+    const r = await shell.fetchOffer(o.envelopeHash)
+    if (r.status === 'started' && typeof r.transferId === 'string') {
+      // A magnet may run for hours; show it where progress lives rather than
+      // leaving a button to imply it is done.
+      openTransfersModal(r.transferId)
+    } else if (r.error || r.status === 'invalid') {
+      showText(String(r.error ?? r.reason ?? 'could not fetch it'), 'danger')
+    }
+    await refreshFeed()
+  })
+  line.append(fetchBtn)
+  wrap.append(line)
+
+  // What pressing Fetch will actually contact, and who said so. Both before
+  // the press, because after it they are no longer a choice.
+  const from = el('div', 'sh-offer-meta')
+  from.setAttribute('data-testid', 'offer-locator')
+  from.textContent = `${o.locator.length > 64 ? `${o.locator.slice(0, 61)}…` : o.locator}`
+  from.title = `${o.locator}\n\nOffered by ${o.poster || 'an unknown key'}${
+    o.relayUrl ? ` on ${o.relayUrl}` : ''
+  }. That is who told you about it — not who wrote it, which nobody here knows until it is fetched.`
+  wrap.append(from)
+
+  if (o.state === 'failed' && o.reason) {
+    const why = el('div', 'sh-offer-meta sh-offer-failed', o.reason)
+    why.setAttribute('data-testid', 'offer-failed')
+    wrap.append(why)
+  }
+  return wrap
+}
+
 /** A local, unsigned draft. Same grid so the columns still line up. */
 function draftItem(d: DraftRow): HTMLElement {
   const item = el('button', 'sh-feed-item sh-feed-item--draft')
@@ -1187,7 +1262,7 @@ async function refreshFeed(): Promise<void> {
   // activity rather than content. Without this a busy forum thread would push
   // a memo addressed to you off the bottom of the list.
   const query = feedScope === 'mine' && myAuthorKey ? { author: myAuthorKey, rollUp: true } : { rollUp: true }
-  const [drafts, rows] = await Promise.all([shell.drafts(), shell.feed(query)])
+  const [drafts, rows, offers] = await Promise.all([shell.drafts(), shell.feed(query), shell.offers()])
   feedPane.replaceChildren()
   // Drafts are yours by definition and are never published, so the Mine/All
   // scope does not apply to them — they always show.
@@ -1196,6 +1271,17 @@ async function refreshFeed(): Promise<void> {
     title.setAttribute('data-testid', 'feed-drafts-title')
     feedPane.append(title)
     for (const d of drafts) feedPane.append(draftItem(d))
+  }
+  // Offered: things a relay said exist that are not here. A draft in reverse,
+  // and shown the same way — its own section, never mixed into the feed, so
+  // nothing unfetched can be mistaken for something you hold. Like drafts, the
+  // Mine/All scope does not apply: nobody knows who wrote these yet.
+  if (offers.length > 0) {
+    const title = el('div', 'sh-feed-title', `Offered · ${offers.length}`)
+    title.setAttribute('data-testid', 'feed-offers-title')
+    title.title = 'Things a relay says exist. Nothing has been downloaded — pressing Fetch is what contacts anybody.'
+    feedPane.append(title)
+    for (const o of offers) feedPane.append(offerItem(o))
   }
   const head = el('div', 'sh-feed-title sh-feed-head')
   head.append(el('span', undefined, `${feedScope === 'mine' ? 'By you' : 'Feed'} · ${rows.length}`), feedFilter())
@@ -2382,6 +2468,28 @@ function forumPostBody(
   overlay: HTMLElement,
   verdict: { verdict: string; byName: string; by: string; why: string } | null
 ): HTMLElement {
+  // Not held: it ranks here because votes point at a hash whether or not you
+  // have the thing, but it cannot be opened and has no author to show.
+  if (row.offered === true) {
+    const stub = offerItem({
+      envelopeHash: String(row.envelopeHash),
+      locator: String(row.locator ?? ''),
+      relayUrl: String(row.relayUrl ?? ''),
+      poster: String(row.poster ?? ''),
+      type: String(row.type ?? 'thing'),
+      inGroup: rootHash,
+      replyTo: null,
+      state: (row.offerState as OfferRow['state']) ?? 'offered',
+      reason: String(row.offerReason ?? ''),
+      seenAt: Number(row.receivedAt ?? 0)
+    })
+    const v = row.votes as { score: number; tribeUp: number; tribeDown: number; up: number; down: number }
+    const score = el('span', 'sh-forum-score', v.score > 0 ? `+${v.score}` : String(v.score))
+    score.setAttribute('data-testid', 'forum-score')
+    score.title = voteTitle(v)
+    stub.prepend(score)
+    return stub
+  }
   const item = el('button', 'sh-feed-item')
   item.setAttribute('data-testid', 'forum-post')
   item.setAttribute('data-envelope-hash', String(row.envelopeHash))

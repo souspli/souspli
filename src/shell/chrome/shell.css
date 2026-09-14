@@ -375,6 +375,25 @@ body {
 .sh-sharing-head { display: flex; align-items: center; gap: var(--evm-space-2); margin-bottom: var(--evm-space-2); }
 .sh-sharing-head > .sh-hint { flex: 1; }
 
+/* Offered: a thing a relay says exists, that is not here. Styled apart from a
+   feed row on purpose — nothing unfetched may read as something you hold. */
+.sh-offer {
+  padding: var(--evm-space-2) var(--evm-space-3);
+  border-left: 2px dashed var(--evm-border);
+  margin-bottom: var(--evm-space-1);
+}
+.sh-offer .sh-feed-line { align-items: center; gap: var(--evm-space-2); }
+.sh-offer-claim { flex: 1; font-size: var(--evm-text-sm); color: var(--evm-text-2); font-style: italic; }
+.sh-offer-fetch { flex: 0 0 auto; }
+.sh-offer-meta {
+  margin-top: 2px;
+  font-family: var(--evm-font-mono);
+  font-size: var(--evm-text-sm);
+  color: var(--evm-text-2);
+  overflow-wrap: anywhere;
+}
+.sh-offer-failed { color: var(--evm-danger); font-family: inherit; }
+
 /* Votes. The score and the tribe count sit side by side on purpose: they are
    two different claims about the same thing, and a single merged number would
    be exactly the ranking nobody can explain. */
