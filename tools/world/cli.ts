@@ -160,7 +160,7 @@ function usage(): void {
   log('  live <slug>...        launch real instances and hold them open')
   log('  magnet [--from ada] [--to grace] [--timeout 180000]')
   log('                        seed a fresh thing on one and fetch it on the other')
-  log('  forum  [--as ada] [--vs linus]')
+  log('  forum  [--as ada] [--vs linus] [--forum wire]')
   log('                        the same forum, ranked in two libraries')
   log('  relay  [--from ada] [--to grace] [--relay wss://…]')
   log('                        post a thing on one; receive it on the other, unasked')

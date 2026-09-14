@@ -26,10 +26,58 @@ them. `relay` starts a local relay in-process by default, so it works offline;
 
 `forum` is the one to run if you only run one. It prints the same forum as two
 different accounts see it — identical bytes, different order, because each
-library weights the same votes by whose vouches reach the voter. In the seeded
-world Ada's top post is the one four strangers downranked, and the listicle
-they all upvoted sits last, because one person Ada actually vouched for voted
-against it.
+library weights the same votes by whose vouches reach the voter. Ada's top post
+is the investigation three of her own people voted up; the listicle four
+strangers pushed sits **last** for her, because one person she vouched for voted
+against it. Linus, who has vouched for nobody on the desk, sees the listicle
+first. `--forum tenants` picks the other one.
+
+## What the seeded world holds
+
+Two forums, so "which communities am I in" is a real question:
+
+- **Meridian Press — the wire.** Ada keeps it, Grace moderates. Five posts: an
+  investigation with headings and a footnote, a photo essay with an actual
+  photograph wrapped in the text, a listicle, spam, and an oversize plate set.
+  A four-deep argument runs under the investigation, with votes on the
+  *comments* as well as the posts, so a thread has an order too. Grace has
+  hidden one post and endorsed another — both verdicts, so neither path is
+  theoretical. Kestrel, a stranger, has asked to join and is still pending,
+  because the roster is what decides.
+- **Vale Street tenants.** A different keeper, a different moderator, and a
+  roster Ada is on but the press desk mostly is not.
+
+The plate set is over the relay's 32 KiB inline cap, so Linus — who reads the
+wire from outside — holds it as an **offer** rather than a post: a stub saying
+it exists, with Fetch beside it. Pressing Fetch resolves, which is the whole
+pointer path in miniature. (Staged: the bytes sit in his seed store and the
+locator is `bundle:`, so it works with no swarm. Over a real relay it would be
+a magnet.)
+
+A third forum, **the long read**, holds four essays: Ada Lovelace raising a
+Series A, Turing on why nobody stars his repository, Grace Hopper on shipping
+on a Friday, and a dissent from the bench about the moderator hiding the gold
+advertisement. They are **pastiche** — written for this world, in borrowed
+voices, about things none of these people lived to see — and each carries a
+`rights` line saying exactly that, which renders in the article's "Where this
+came from" footer under the words "None of it is verified."
+
+They exist because content too thin to read is also too thin to test: every
+article in this world rendered as **"Untitled" with no text at all** for
+months, and nobody noticed, because a one-sentence stage direction looks much
+the same whether or not the program is reading it.
+
+> **Watch the field names.** A thing program reads the args it names and
+> silently ignores everything else — `samples/article.html` coerces an unknown
+> block kind to a paragraph and falls back to "Untitled" for a missing title.
+> The world wrote `headline`/`standfirst`/`body` at an article that reads
+> `title`/`deck`/`blocks`, and a memo `body` at a program that reads `message`.
+> Nothing failed; it all just rendered empty. When adding content, check the
+> `State: args {…}` line at the top of the sample program, and then **open the
+> thing** — the manifest containing your field proves nothing.
+
+Images are **generated, not committed** (`tools/world/image.ts`): a binary blob
+in the repo is a thing nobody reviews and everybody carries.
 
 ## Why it is cheap
 
