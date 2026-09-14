@@ -192,13 +192,13 @@ async function articleWithAttestations(c: Cast, log: (s: string) => void): Promi
       type: 'article',
       created: T0 + 8 * DAY,
       args: {
-        headline: 'Harbour Yard redevelopment approved after two-year inquiry',
-        standfirst: 'Councillors voted seven to four in favour, ending the longest planning inquiry in the borough’s history.',
+        title: 'Harbour Yard redevelopment approved after two-year inquiry',
+        deck: 'Councillors voted seven to four in favour, ending the longest planning inquiry in the borough’s history.',
         byline: c.grace!.who.name,
         publisher: 'Meridian Press',
         published: '2026-06-09',
         location: 'Harbour Yard',
-        body: [
+        blocks: [
           { kind: 'paragraph', text: 'The committee approved the scheme on Tuesday evening after a hearing that ran past eleven o’clock.' },
           { kind: 'heading', text: 'What was decided' },
           { kind: 'paragraph', text: 'Consent covers 240 homes, a school, and the retention of the listed crane on the eastern quay.' },
@@ -355,13 +355,13 @@ async function forum(c: Cast, log: (s: string) => void): Promise<void> {
     ).envelopeHash
 
   const investigation = await article(c.katherine!, T0 + 11 * DAY + 3600, {
-    headline: 'The Harbour Yard figures do not add up',
-    standfirst:
+    title: 'The Harbour Yard figures do not add up',
+    deck:
       'The developer’s own filings put the affordable-housing count 38 homes below what the committee was told.',
     byline: c.katherine!.who.name,
     publisher: 'Meridian Press',
     published: '2026-06-12',
-    body: [
+    blocks: [
       {
         kind: 'paragraph',
         text: 'The scheme approved last week was presented to councillors as delivering 72 affordable homes out of 240. The developer’s filed viability assessment, published the same afternoon, counts 34.'
@@ -391,10 +391,10 @@ async function forum(c: Cast, log: (s: string) => void): Promise<void> {
   })
 
   const listicle = await article(c.mary!, T0 + 11 * DAY + 5400, {
-    headline: 'Ten tools every newsroom desk needs',
-    standfirst: 'Number four is a notebook.',
+    title: 'Ten tools every newsroom desk needs',
+    deck: 'Number four is a notebook.',
     byline: c.mary!.who.name,
-    body: [
+    blocks: [
       {
         kind: 'paragraph',
         text: 'Every desk runs on the same handful of things, and most of them cost nothing. Here is the list, in no particular order, except the order that suits me.'
@@ -410,11 +410,11 @@ async function forum(c: Cast, log: (s: string) => void): Promise<void> {
     c.alan!,
     T0 + 11 * DAY + 7200,
     {
-      headline: 'The crane goes in October',
-      standfirst: 'Photographing Harbour Yard before the listed crane comes down.',
+      title: 'The crane goes in October',
+      deck: 'Photographing Harbour Yard before the listed crane comes down.',
       byline: c.alan!.who.name,
       published: '2026-06-12',
-      body: [
+      blocks: [
         {
           kind: 'paragraph',
           text: 'It has been on the eastern quay since 1953 and it is coming down in October, consent or no consent. I went at dusk on the last clear evening.'
@@ -440,9 +440,9 @@ async function forum(c: Cast, log: (s: string) => void): Promise<void> {
   )
 
   const spam = await article(c.linus!, T0 + 11 * DAY + 9000, {
-    headline: 'BUY GOLD NOW — LIMITED WINDOW',
-    standfirst: '',
-    body: [{ kind: 'paragraph', text: 'Click here. Act fast. This will not be repeated.' }]
+    title: 'BUY GOLD NOW — LIMITED WINDOW',
+    deck: '',
+    blocks: [{ kind: 'paragraph', text: 'Click here. Act fast. This will not be repeated.' }]
   })
 
   const vote = async (who: OpenAccount, on: string, dir: 1 | -1, at: number): Promise<void> => {
@@ -613,11 +613,11 @@ async function forum(c: Cast, log: (s: string) => void): Promise<void> {
         type: 'article',
         created: T0 + 11 * DAY + 20_000,
         args: {
-          headline: 'Service charge statement is nine weeks late',
-          standfirst: 'The lease says twenty-eight days after year end. It is now sixty-three.',
+          title: 'Service charge statement is nine weeks late',
+          deck: 'The lease says twenty-eight days after year end. It is now sixty-three.',
           byline: c.sandra!.who.name,
           inGroup: tenants,
-          body: [
+          blocks: [
             {
               kind: 'paragraph',
               text: 'Clause 6.4 requires the statement within twenty-eight days of the accounting year end. Nobody has had one.'
@@ -671,11 +671,11 @@ async function forum(c: Cast, log: (s: string) => void): Promise<void> {
     type: 'article',
     created: T0 + 11 * DAY + 21_000,
     args: {
-      headline: 'Harbour Yard: the full plate set',
-      standfirst: 'Forty exposures from the last week of the crane, at print resolution.',
+      title: 'Harbour Yard: the full plate set',
+      deck: 'Forty exposures from the last week of the crane, at print resolution.',
       byline: c.alan!.who.name,
       inGroup: wire,
-      body: [
+      blocks: [
         {
           kind: 'paragraph',
           text: 'The whole set, unedited, because the archive wants the negatives and the archive is right.'
@@ -714,6 +714,288 @@ async function forum(c: Cast, log: (s: string) => void): Promise<void> {
   log(`  forum: Vale Street tenants — a second community, with a different roster`)
   log(`  offer: ${c.linus!.who.name} sees the oversize plate set as a pointer, not a post`)
   log(`         ranking differs by reader: pnpm world forum --as ada --vs linus`)
+}
+
+/** The disclaimer every pastiche below carries, in the article's `rights`
+ *  field — which renders in the "Where this came from" footer, under a line
+ *  that already says none of it is verified.
+ *
+ *  These are IMITATIONS. They were written to give this software something
+ *  real-shaped to render: an article with headings, a standfirst, a footnote
+ *  and a byline behaves differently from one with a sentence in it, and the
+ *  bug that prompted all this (every article rendering as "Untitled" with no
+ *  text) hid behind content too thin to notice it was missing. The voices are
+ *  borrowed and the opinions are invented, which the anachronisms make
+ *  obvious: none of these people lived to see a pull request. */
+const PASTICHE =
+  'FICTION. Written for this software’s test world. The voice is an imitation and the opinions are invented — ' +
+  'not by, from, or endorsed by the person named, who died long before any of the things described existed.'
+
+/** The long read: the desk's essay forum, where the cast writes in their own
+ *  register about things none of them lived to see.
+ *
+ *  Kept apart from the wire on purpose. The wire is where the ranking and
+ *  moderation demo lives, and that needs spam and a listicle to push around;
+ *  this needs to read like something somebody wrote. */
+async function longRead(c: Cast, log: (s: string) => void): Promise<void> {
+  const desk = ['ada', 'grace', 'alan', 'katherine', 'dorothy', 'joan', 'edith', 'oliver', 'ida'].map((k) => c[k]!)
+  const member = (a: OpenAccount, role: string): Record<string, string> => ({
+    key: a.who.address,
+    scheme: 'eth-eip191',
+    role,
+    name: a.who.name
+  })
+
+  const room = (
+    await publish(
+      c.ada!,
+      {
+        type: 'group',
+        created: T0 + 13 * DAY,
+        args: {
+          name: 'The long read',
+          purpose: 'Essays. One a week, as long as they need to be, and no listicles.',
+          members: [
+            member(c.ada!, 'founder'),
+            member(c.edith!, 'moderator'),
+            member(c.alan!, 'member'),
+            member(c.grace!, 'member'),
+            member(c.oliver!, 'member'),
+            member(c.katherine!, 'member')
+          ],
+          notes: 'Everything here is fiction written to test this software. See the Rights line on each piece.'
+        }
+      },
+      desk
+    )
+  ).envelopeHash
+
+  const essay = async (
+    who: OpenAccount,
+    at: number,
+    args: Record<string, unknown>
+  ): Promise<string> =>
+    (
+      await publish(
+        who,
+        {
+          type: 'article',
+          created: at,
+          args: {
+            ...args,
+            byline: who.who.name,
+            publisher: 'Meridian Press — the long read',
+            section: 'Essays',
+            language: 'en',
+            rights: PASTICHE,
+            inGroup: room
+          }
+        },
+        desk
+      )
+    ).envelopeHash
+
+  const seriesA = await essay(c.ada!, T0 + 13 * DAY + 3600, {
+    title: 'Notes upon the Raising of a Series A',
+    deck: 'In which the Engine acquires a valuation, and its author acquires a board seat she did not ask for.',
+    published: '1843-07-01',
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: 'It is not generally understood, even by those who follow such matters closely, that an Engine which has cost some eight years of labour may be valued in an afternoon by a gentleman who has not seen it work. I have now had this experience twice, and set down the particulars here in the hope that they may be of service to others.'
+      },
+      { kind: 'heading', text: 'Note A. Upon the Term Sheet' },
+      {
+        kind: 'paragraph',
+        text: 'The document was four pages, of which three concerned what should happen were the Engine to fail, and one what should happen were it to succeed. I observed to Mr. B. that this proportion seemed to me to reveal the author’s true expectation. He replied that it was standard. I have since learnt that this word, in the City, means only that somebody else has already agreed to it.'
+      },
+      { kind: 'subheading', text: 'Of the Valuation' },
+      {
+        kind: 'paragraph',
+        text: 'We are valued at four hundred thousand pounds, on the strength of a market which does not exist, for a machine which is not finished, to be sold to persons who have not been born. I am assured this is conservative. Mr. Babbage, upon hearing the figure, enquired whether it might be paid in brass.'
+      },
+      { kind: 'heading', text: 'Note D. Upon the Board' },
+      {
+        kind: 'paragraph',
+        text: 'I am now to have a Board, which is to consist of myself, the gentleman who has not seen the Engine work, and a third person agreeable to us both. We have spent a fortnight failing to find anybody agreeable to us both. I begin to suspect that this seat is left empty by design, and that the design is not mine.'
+      },
+      { kind: 'heading', text: 'Note G. Upon Vesting' },
+      {
+        kind: 'paragraph',
+        text: 'My own interest in the Engine is to be returned to me by degrees over four years, the first quarter being withheld for twelve months entire. That is to say: I am to earn, by attendance, a thing I have already made. I raised this. It was explained to me that the arrangement protects the company from a founder who leaves. I observed that I am the only person who knows how the Engine works, and that were I to leave there would be no company to protect. This was noted as a fair point and the clause was not altered.'
+      },
+      {
+        kind: 'paragraph',
+        text: 'I am further required to append to all descriptions of the Engine a statement that it has no pretensions whatever to originate any thing, and can do only what we know how to order it to perform. I wrote that sentence myself, some years ago, as a caution against enthusiasm. It is now in the prospectus, in small type, directly beneath a claim that the Engine thinks.'
+      },
+      {
+        kind: 'footnote',
+        text: 'The third Board seat remains empty at the time of writing. Mr. B. proposes his cousin. I propose that we finish the Engine first and discover afterwards whether anybody wants it, which I am told is the wrong order and, I am given to understand, has never been tried.'
+      }
+    ]
+  })
+
+  const stars = await essay(c.alan!, T0 + 13 * DAY + 7200, {
+    title: 'Computing Machinery and Stars',
+    deck: 'I propose to consider the question, “Can a repository be popular?”',
+    published: '1950-10-01',
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: 'I propose to consider the question, “Can a repository be popular?” This should begin with definitions of the terms “repository” and “popular”. But the definitions are framed so as to reflect so far as possible the normal use of the words, and that is dangerous here, because the normal use of “popular” is a number in the corner of a page, and I am not sure the number means anything at all.'
+      },
+      { kind: 'heading', text: 'The Imitation Game' },
+      {
+        kind: 'paragraph',
+        text: 'The new form of the problem can be described in terms of a game which we call the imitation game. It is played with three parties: a maintainer (A), an account of indeterminate nature (B), and an interrogator (C) who is also the maintainer, at two o’clock in the morning, reading the issue tracker. C must determine which of A and B is a person.'
+      },
+      {
+        kind: 'paragraph',
+        text: 'B writes: “Great work! Following for more.” A writes: “this is broken on ARM.” The interrogator concludes that B is a person, because B was kind, and that A is a machine, because no person has ever opened an issue in that tone. The interrogator is wrong on both counts. I believe that in about fifty years’ time it will be possible to play the imitation game so well that the average maintainer will not have more than seventy per cent. chance of making the right identification after five minutes of scrolling.'
+      },
+      { kind: 'heading', text: 'Contrary Views on the Main Question' },
+      { kind: 'subheading', text: '(1) The Theological Objection' },
+      {
+        kind: 'paragraph',
+        text: 'Stars are a gift of God to popular projects, and therefore no unpopular project can have them. I am not impressed by this argument, though I notice it is the one most often advanced, usually in the form “if it were any good people would have heard of it”.'
+      },
+      { kind: 'subheading', text: '(2) The Argument from Continuity of the README' },
+      {
+        kind: 'paragraph',
+        text: 'It is urged that a project is not a discrete-state machine, and that a small alteration to its README may make a very large difference to its reception. This is quite true. I added an animated diagram and the rate of stars trebled in a week, during which no line of the program was altered. The argument is therefore conceded, and I find it does not comfort me.'
+      },
+      { kind: 'heading', text: 'Learning Machines' },
+      {
+        kind: 'paragraph',
+        text: 'Instead of trying to produce a programme to simulate the adult mind, why not rather try to produce one which simulates the child’s? I did so. It stars my repository every morning at six. It has left one hundred and forty comments, each of which says that this is a great work and that it is following for more. I cannot distinguish it from the others, and I have stopped trying, which I am aware is precisely the result I predicted and did not expect to mind.'
+      },
+      {
+        kind: 'footnote',
+        text: 'Since writing the above I have been informed that the number in the corner of the page may be purchased, in lots of one thousand, for rather less than the cost of an evening out. I have not tested this claim, on the grounds that the experiment would be indistinguishable from its own null result.'
+      }
+    ]
+  })
+
+  const friday = await essay(c.grace!, T0 + 13 * DAY + 10_800, {
+    title: 'It is easier to apologise: on shipping upon a Friday',
+    deck: 'A nanosecond is eleven inches. A rollback is four hours. Plan accordingly.',
+    published: '1982-11-05',
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: 'I keep a length of wire on my desk, eleven and a half inches long. That is a nanosecond: as far as light gets in one. I hand them out because engineers who have not held a nanosecond will cheerfully add nine hundred of them to a loop and call the result instantaneous.'
+      },
+      { kind: 'heading', text: 'On the Friday question' },
+      {
+        kind: 'paragraph',
+        text: 'I am told the rule is that we do not ship on a Friday. The rule is not about Friday. It is about whether the person who can undo the change will be reachable when it needs undoing, and that is a question about your staffing, not your calendar. Answer the real question and Friday stops mattering. Refuse to answer it and Thursday will not save you.'
+      },
+      { kind: 'heading', text: 'On committees' },
+      {
+        kind: 'paragraph',
+        text: 'We spent four years standardising a language by committee. It was slow, it was tedious, and the result runs on machines built by people who hated each other. I am now shown a directory of eleven hundred dependencies assembled in an afternoon, and told this is the improvement. Both approaches work. Only one of them can tell you who is responsible on a Sunday.'
+      },
+      {
+        kind: 'paragraph',
+        text: 'The most damaging phrase in the language is “we have always done it this way”. I said that about the committee, and it applies equally to the directory. Neither of you is exempt because you are the newer of the two.'
+      },
+      { kind: 'heading', text: 'On the log' },
+      {
+        kind: 'paragraph',
+        text: 'Somebody taped a moth into a logbook once and we have been calling faults “bugs” ever since. The useful part was never the word. It was the tape: the fault was kept, dated, and signed, where the next person would find it. Keep your logs. Sign them. Nobody has ever regretted being able to prove what happened.'
+      },
+      {
+        kind: 'footnote',
+        text: 'Yes, ship on Friday. Ship on Friday and stay until seven. If that sentence alarms you, the problem was never the day of the week.'
+      }
+    ]
+  })
+
+  const dissent = await essay(c.oliver!, T0 + 13 * DAY + 14_400, {
+    title: 'Dissenting, upon the matter of the hidden post',
+    deck: 'The desk having concealed a post about gold, I would have let the market decide.',
+    published: '1919-11-10',
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: 'I dissent. The post in question urged the immediate purchase of gold, in capitals, and was concealed by a moderator acting within a roster which I do not dispute she holds. My disagreement is not with her authority. It is with the use of it.'
+      },
+      { kind: 'heading', text: 'Of the standard applied' },
+      {
+        kind: 'paragraph',
+        text: 'Persecution for the expression of opinions seems to me perfectly logical, and I have said so before. If you have no doubt of your premises and want a certain result with all your heart, you naturally sweep away all opposition. To allow opposition by speech indicates either that you think the speech impotent, or that you do not care for the result.'
+      },
+      {
+        kind: 'paragraph',
+        text: 'But the ultimate good desired is better reached by free trade in ideas, and the best test of truth is the power of the thought to get itself accepted in the competition of the market. That is the theory of this forum, as it is of larger things. It is an experiment, as all life is an experiment.'
+      },
+      { kind: 'heading', text: 'Of the remedy already to hand' },
+      {
+        kind: 'paragraph',
+        text: 'I note that the machinery of this place had already answered the post before the moderator reached it. Four accounts of no acquaintance to anybody here had voted it up; one member of the desk had voted it down; and by the arithmetic this forum applies, it sat at the bottom of the page regardless. The remedy was working. What the concealment added was not safety but tidiness.'
+      },
+      {
+        kind: 'paragraph',
+        text: 'I would be eternally vigilant against attempts to check the expression of opinions that we loathe, unless they so imminently threaten immediate interference with the lawful and pressing purposes of this desk that an immediate check is required. An advertisement for gold does not so threaten. It merely bores us, and boredom has never yet been held to be an emergency.'
+      },
+      {
+        kind: 'footnote',
+        text: 'The post remains one press away for any reader who wishes it, which is the only feature of this arrangement I am content with, and I record that contentment so that it may be quoted back at me when I am next in the majority.'
+      }
+    ]
+  })
+
+  const vote = async (who: OpenAccount, on: string, dir: 1 | -1, at: number): Promise<void> => {
+    await publish(who, { type: 'vote', created: at, args: { votesOn: on, dir } }, desk)
+  }
+  await vote(c.alan!, seriesA, 1, T0 + 13 * DAY + 15_000)
+  await vote(c.katherine!, seriesA, 1, T0 + 13 * DAY + 15_060)
+  await vote(c.grace!, seriesA, 1, T0 + 13 * DAY + 15_120)
+  await vote(c.ada!, stars, 1, T0 + 13 * DAY + 15_180)
+  await vote(c.joan!, stars, 1, T0 + 13 * DAY + 15_240)
+  await vote(c.ada!, friday, 1, T0 + 13 * DAY + 15_300)
+  await vote(c.edith!, dissent, 1, T0 + 13 * DAY + 15_360)
+  await vote(c.ida!, dissent, 1, T0 + 13 * DAY + 15_420)
+
+  const say = async (who: OpenAccount, to: string, body: string, at: number): Promise<string> =>
+    (await publish(who, { type: 'comment', created: at, args: { body, replyTo: to, inGroup: room } }, desk))
+      .envelopeHash
+
+  const c1 = await say(
+    c.grace!,
+    seriesA,
+    'Four years to vest a machine you already built. Somebody should tell them the machine does not vest; it either runs on Monday or it does not.',
+    T0 + 13 * DAY + 16_000
+  )
+  await say(
+    c.ada!,
+    c1,
+    'I did tell them. It was noted as a fair point, which I have learnt is the sound a room makes when nothing is going to change.',
+    T0 + 13 * DAY + 16_600
+  )
+  await say(
+    c.katherine!,
+    stars,
+    'Your objection (2) is the whole paper. Nobody read the program. They read the picture at the top of the page and formed a complete opinion, and they were not wrong to — it was the only part anybody had checked.',
+    T0 + 13 * DAY + 17_200
+  )
+  const c2 = await say(
+    c.edith!,
+    dissent,
+    'Noted, and the post stays hidden. You are right that the arithmetic had already buried it. I hid it so nobody would have to scroll past an advertisement to reach the reporting, which is a matter of housekeeping and not of truth.',
+    T0 + 13 * DAY + 17_800
+  )
+  await say(
+    c.oliver!,
+    c2,
+    'Housekeeping is how it always begins, and I do not say that as an accusation. I say it because in thirty years somebody will quote this thread at whoever holds the roster then, and they should find both halves of it.',
+    T0 + 13 * DAY + 18_400
+  )
+  await vote(c.ada!, c2, 1, T0 + 13 * DAY + 18_600)
+  await vote(c.grace!, c1, 1, T0 + 13 * DAY + 18_660)
+
+  log(`  forum: the long read — 4 essays with real structure, all clearly marked fiction`)
+  log(`         (headings, standfirsts, footnotes, and a Rights line saying who did not write them)`)
 }
 
 /** An invoice, so there is one to look at. Money is in minor units and
@@ -800,7 +1082,7 @@ async function everyday(c: Cast, log: (s: string) => void): Promise<void> {
     await publish(a, {
       type: 'nametag',
       created: T0 + 10 * DAY + n * 300,
-      args: { name: a.who.name, subtitle: a.who.role }
+      args: { name: a.who.name }
     })
     n++
   }
@@ -814,7 +1096,7 @@ async function everyday(c: Cast, log: (s: string) => void): Promise<void> {
         to: 'All desks',
         from: c.joan!.who.name,
         subject: 'Copy deadlines move to 16:00 from Monday',
-        body: 'The print slot has been brought forward an hour. Filed copy after 16:00 will hold to the next edition.'
+        message: 'The print slot has been brought forward an hour. Filed copy after 16:00 will hold to the next edition.'
       }
     },
     press
@@ -850,6 +1132,7 @@ export async function buildWorld(accounts: OpenAccount[], log: (s: string) => vo
   await articleWithAttestations(c, log)
   await group(c, log)
   await forum(c, log)
+  await longRead(c, log)
   await invoice(c, log)
   await everyday(c, log)
 }

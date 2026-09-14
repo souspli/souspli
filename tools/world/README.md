@@ -54,6 +54,28 @@ pointer path in miniature. (Staged: the bytes sit in his seed store and the
 locator is `bundle:`, so it works with no swarm. Over a real relay it would be
 a magnet.)
 
+A third forum, **the long read**, holds four essays: Ada Lovelace raising a
+Series A, Turing on why nobody stars his repository, Grace Hopper on shipping
+on a Friday, and a dissent from the bench about the moderator hiding the gold
+advertisement. They are **pastiche** — written for this world, in borrowed
+voices, about things none of these people lived to see — and each carries a
+`rights` line saying exactly that, which renders in the article's "Where this
+came from" footer under the words "None of it is verified."
+
+They exist because content too thin to read is also too thin to test: every
+article in this world rendered as **"Untitled" with no text at all** for
+months, and nobody noticed, because a one-sentence stage direction looks much
+the same whether or not the program is reading it.
+
+> **Watch the field names.** A thing program reads the args it names and
+> silently ignores everything else — `samples/article.html` coerces an unknown
+> block kind to a paragraph and falls back to "Untitled" for a missing title.
+> The world wrote `headline`/`standfirst`/`body` at an article that reads
+> `title`/`deck`/`blocks`, and a memo `body` at a program that reads `message`.
+> Nothing failed; it all just rendered empty. When adding content, check the
+> `State: args {…}` line at the top of the sample program, and then **open the
+> thing** — the manifest containing your field proves nothing.
+
 Images are **generated, not committed** (`tools/world/image.ts`): a binary blob
 in the repo is a thing nobody reviews and everybody carries.
 
