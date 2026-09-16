@@ -175,6 +175,10 @@ body {
   min-width: 0;
 }
 .sh-thing-header {
+  /* 44 of content + the 1px border below = 45 rendered, which is what
+     THING_HEADER in main.ts must say -- it decides where the cage begins, and
+     the border IS the trust boundary. There is no global box-sizing reset, so
+     this height does not include the border. Change one and change the other. */
   height: 44px;
   display: flex;
   align-items: center;

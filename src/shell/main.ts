@@ -65,7 +65,14 @@ const CHROME_PRELOAD = join(__dirname, '../../preload/shell/chrome.js')
  *  where the cage begins, so the two must move together. */
 const TOP_BAR = 84
 const FEED_WIDTH = 300
-const THING_HEADER = 44
+/** Mirrors .sh-thing-header in shell.css: 44px of content PLUS its 1px
+ *  border-bottom, which is the line that draws the trust boundary itself.
+ *
+ *  It said 44 for a long time. The header is content-box (there is no global
+ *  box-sizing reset), so it renders 45, and the cage began one pixel high --
+ *  covering that border with content the thing controls. Measured, not
+ *  guessed: the chrome occupies 0..129 and the cage started at 128. */
+const THING_HEADER = 45
 
 // ── Bootstrap: privileged thing: scheme + WebRTC (before app ready) ──────────
 protocol.registerSchemesAsPrivileged([
@@ -679,11 +686,20 @@ app.whenReady().then(async () => {
   let zoomLevel = 0
   const zoomFactor = (): number => Math.pow(1.2, zoomLevel)
 
+  /** Where the cage goes: below the chrome, right of the feed.
+   *
+   *  CEIL, not round. These are the edges of a TRUST BOUNDARY, and at most
+   *  zoom factors the product is fractional -- 129 x 1.2^-1 is 107.45, which
+   *  rounds to 107 and puts the cage back over the chrome by half a pixel.
+   *  Rounding a boundary must always break toward giving the cage LESS area,
+   *  never more: a sub-pixel gap shows chrome's own background, while a
+   *  sub-pixel overlap shows content the thing controls on top of the line
+   *  that says where the thing begins. */
   function cageRect(): Electron.Rectangle {
     const { width, height } = win.getContentBounds()
     const z = zoomFactor()
-    const x = Math.round(FEED_WIDTH * z)
-    const y = Math.round((TOP_BAR + THING_HEADER) * z)
+    const x = Math.ceil(FEED_WIDTH * z)
+    const y = Math.ceil((TOP_BAR + THING_HEADER) * z)
     return { x, y, width: width - x, height: height - y }
   }
   function layout(): void {

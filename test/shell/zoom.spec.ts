@@ -76,7 +76,7 @@ const settled = (s: ZoomState, factor: number, baseX: number): boolean =>
   Math.abs(s.chromeZoom - factor) < 0.005 &&
   s.thingZooms.length >= 2 &&
   s.thingZooms.every((z) => Math.abs(z - factor) < 0.005) &&
-  s.cageXs.every((x) => x === Math.round(baseX * factor))
+  s.cageXs.every((x) => x === Math.ceil(baseX * factor))
 
 /** Assert the SETTLED state: a live-preview remount can land mid-assertion
  *  (the nametag streams a draft on load), so poll briefly before failing —
@@ -93,7 +93,11 @@ async function expectLockstep(factor: number, baseX: number): Promise<void> {
   // preview cage — EVERY live cage must track the app-level zoom.
   expect(s.thingZooms.length).toBeGreaterThanOrEqual(2)
   for (const z of s.thingZooms) expect(z).toBeCloseTo(factor)
-  for (const x of s.cageXs) expect(x).toBe(Math.round(baseX * factor))
+  // CEIL, matching cageRect: the cage's edges are a trust boundary, so a
+  // fractional product must always round toward giving the cage LESS area.
+  // (At these particular factors 300 x 1.2^n is integral and round would
+  // agree -- which is precisely why encoding the wrong one here went unnoticed.)
+  for (const x of s.cageXs) expect(x).toBe(Math.ceil(baseX * factor))
 }
 
 test('Ctrl +/−/0 zooms chrome and BOTH cages in lockstep, from either view', async () => {
