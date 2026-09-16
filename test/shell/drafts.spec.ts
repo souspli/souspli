@@ -228,6 +228,86 @@ test('publishing consumes the draft and lands on the signed instance', async () 
   }
 })
 
+/** Publish whatever is open, approving the confirm the way a human would, and
+ *  return the outcome. Drives publish through MAIN so the chrome never
+ *  navigates to the draft — which is the shape every scripted publish takes. */
+async function publishOpen(shell: ShellHandle): Promise<Record<string, unknown>> {
+  await shell.app.evaluate(async (electron) => {
+    ;(electron.app as unknown as { __shell: { lastPublish: unknown } }).__shell.lastPublish = null
+  })
+  await poll(
+    () =>
+      shell.app.evaluate(async (electron) => {
+        const s = (electron.app as unknown as { __shell: { publishDraft: () => Record<string, unknown> } }).__shell
+        return s.publishDraft() as never
+      }) as Promise<Record<string, unknown>>,
+    (r) => r?.status === 'pending'
+  )
+  await poll(() => exists(shell, 'confirm-approve'), (v) => v)
+  await click(shell, 'confirm-approve')
+  return (await poll(
+    () =>
+      shell.app.evaluate(async (electron) => {
+        const s = (electron.app as unknown as { __shell: { lastPublish: Record<string, unknown> | null } }).__shell
+        return s.lastPublish as never
+      }) as Promise<Record<string, unknown> | null>,
+    (p) => p?.status === 'valid'
+  )) as Record<string, unknown>
+}
+
+test('publishing does not yank the view off whatever you are looking at now', async () => {
+  // The publish result arrives whenever signing finishes. Landing on the
+  // signed instance is right for someone still watching the draft that was
+  // consumed, and wrong for anyone who has moved on: the open is
+  // fire-and-forget and main orders opens by ARRIVAL, so a stale one wins.
+  //
+  // This was a recurring suite failure rather than a theory. The auto-open
+  // superseded the next draft, and Publish then truthfully reported "nothing
+  // to publish" for as long as anything cared to ask — twenty seconds, in the
+  // spec that kept going red.
+  //
+  // The other half of the rule — that the view DOES follow when it was
+  // showing that draft — is the test above.
+  const shell = await launchShell()
+  try {
+    // Something else, and the chrome is genuinely looking at it.
+    await shell.newDraft('starter:nametag', { name: 'Somewhere else' })
+    const drafts = await shell.drafts()
+    await shell.openThing(drafts[0]!.id)
+    const other = await publishOpen(shell)
+    const otherHash = other.envelopeHash as string
+    await chromeEval(shell, `window.__shellChrome.openThing(${JSON.stringify(otherHash)})`)
+    await poll(
+      () =>
+        chromeEval<string | null>(
+          shell,
+          `document.querySelector('.sh-thing-header')?.getAttribute('data-envelope-hash') ?? null`
+        ),
+      (v) => v === otherHash
+    )
+
+    // Publish a different draft WITHOUT the chrome ever navigating to it —
+    // the shape every scripted publish takes, and the shape a human takes by
+    // clicking away in the window between approving and signing.
+    const started = await shell.newDraft('starter:nametag', { name: 'Elsewhere' })
+    await shell.openThing(started.id as string)
+    const published = await publishOpen(shell)
+    expect(published.draftConsumed, 'a draft really was consumed').toBe(true)
+
+    // Give any stale auto-open every chance to land; without the guard it
+    // fires well inside this.
+    await new Promise((r) => setTimeout(r, 1_000))
+    const header = await chromeEval<string | null>(
+      shell,
+      `document.querySelector('.sh-thing-header')?.getAttribute('data-envelope-hash') ?? null`
+    )
+    expect(header, 'the view stayed where it was put').toBe(otherHash)
+    expect(header).not.toBe(published.envelopeHash)
+  } finally {
+    await shell.close()
+  }
+})
+
 test('a draft keeps its program alive; discarding it releases the blob', async () => {
   const shell = await launchShell()
   try {

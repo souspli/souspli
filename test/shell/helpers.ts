@@ -192,8 +192,16 @@ export { seal, secp256k1, schnorr, hash, parseBundle, cosignBundle, jsToCbor, fr
 
 // ── Shell launcher ───────────────────────────────────────────────────────────
 
+/** Playwright's ElectronApplication, narrowed to what the specs use — and with
+ *  `evaluate` retried. See retryingApp. */
+export interface ShellApp {
+  evaluate: ElectronApplication['evaluate']
+  close: ElectronApplication['close']
+  process: ElectronApplication['process']
+}
+
 export interface ShellHandle {
-  app: ElectronApplication
+  app: ShellApp
   userDataDir: string
   identity(): Promise<{ address: string; nostrPubkey: string; keyStorage: 'os' | 'software' }>
   admit(bytes: Uint8Array): Promise<Record<string, unknown>>
@@ -321,6 +329,52 @@ export interface ShellLaunchOptions {
  *  closes an app that did not finish booting. A short grace period is enough:
  *  either it becomes ready and the close is safe, or it is genuinely wedged and
  *  we close anyway, which is no worse than before. */
+// ── Working around Playwright's Electron support ─────────────────────────────
+// `ElectronApplication.evaluate()` is unreliable on Electron 27+: it rejects at
+// random with "Execution context was destroyed, most likely because of a
+// navigation" or "Promise was collected", with no navigation and nothing wrong
+// in the app. Upstream is microsoft/playwright#33737, CLOSED AS NOT PLANNED —
+// Electron support is marked experimental and this is not going to be fixed.
+//
+// Measured here: roughly 2 in 14 runs of one spec, landing on a different test
+// each time, always inside a poll that evaluates repeatedly. It cost a rerun on
+// most pull requests, and a suite that goes red for reasons unconnected to the
+// change is a suite people stop reading.
+//
+// So: retry, narrowly. ONLY the two known-transient messages, only a few times.
+// Anything else — including a genuinely closed app — propagates immediately,
+// because the one thing worse than a flaky suite is one that retries past a
+// real failure. Each retry is logged, so if this ever starts absorbing
+// something real it is visible rather than silent.
+const TRANSIENT_EVALUATE = /Execution context was destroyed|Promise was collected/i
+const EVALUATE_ATTEMPTS = 5
+
+function retryingApp(app: ElectronApplication): ShellApp {
+  const evaluate = app.evaluate.bind(app) as ElectronApplication['evaluate']
+  return {
+    close: app.close.bind(app),
+    process: app.process.bind(app),
+    evaluate: (async (fn: never, arg: never) => {
+      let last: unknown = null
+      for (let attempt = 1; attempt <= EVALUATE_ATTEMPTS; attempt++) {
+        try {
+          return await evaluate(fn, arg)
+        } catch (e) {
+          if (!TRANSIENT_EVALUATE.test(String((e as Error)?.message ?? e))) throw e
+          last = e
+          process.stderr.write(
+            `[helpers] app.evaluate hit playwright#33737 (attempt ${attempt}/${EVALUATE_ATTEMPTS}): ${
+              (e as Error).message.split('\n')[0]
+            }\n`
+          )
+          await new Promise((r) => setTimeout(r, 50 * attempt))
+        }
+      }
+      throw last
+    }) as ElectronApplication['evaluate']
+  }
+}
+
 async function closeSettled(app: ElectronApplication, graceMs = 5_000): Promise<void> {
   const deadline = Date.now() + graceMs
   while (Date.now() < deadline) {
@@ -438,7 +492,10 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
     }
   }
   if (!launched) throw lastErr instanceof Error ? lastErr : new Error('shell failed to launch')
-  const app = launched
+  const rawApp = launched
+  // Everything the specs and this file evaluate goes through the retrying
+  // wrapper; the raw handle is kept for the few things that are not evaluate.
+  const app = retryingApp(rawApp)
 
   // DIAGNOSTIC (SHELL_EXIT_LOG): record HOW an app goes away. A shell that
   // dies mid-test surfaces only as "Target page, context or browser has been
@@ -446,7 +503,7 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
   // exited cleanly. Capture the exit code/signal, a tail of its stderr, and
   // the machine's free memory at that moment.
   if (process.env.SHELL_EXIT_LOG) {
-    const proc = app.process()
+    const proc = rawApp.process()
     const tail: string[] = []
     proc.stderr?.on('data', (b: Buffer) => {
       tail.push(String(b))
@@ -467,7 +524,7 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
     })
   }
 
-  await ackSafetyNotice(app)
+  await ackSafetyNotice(rawApp)
 
   return {
     app,
@@ -823,7 +880,7 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
       }
     },
     close: async () => {
-      await closeSettled(app)
+      await closeSettled(rawApp)
       if (ownsDir) rmSync(userDataDir, { recursive: true, force: true })
     }
   }

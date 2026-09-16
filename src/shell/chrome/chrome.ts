@@ -3192,7 +3192,19 @@ shell.onPublishResult((o) => {
     showText('Published to your feed', 'success')
     // The draft was consumed — land on the signed instance, which really is
     // "✓ signed" (the draft's own header said DRAFT).
-    if (o.draftConsumed === true && typeof o.envelopeHash === 'string') void openThing(o.envelopeHash)
+    //
+    // ONLY if this window is still showing that draft. This result arrives
+    // whenever the signing finishes, and an unconditional open here is a
+    // fire-and-forget request that can land AFTER something else has been
+    // opened -- main orders opens by arrival, so the stale one wins and yanks
+    // the view off whatever you just chose. Rare by hand (the window is a few
+    // milliseconds) and reliable under automation, where it was a recurring
+    // test failure: the published thing superseded the next draft, and Publish
+    // then truthfully reported nothing to publish for as long as anyone asked.
+    const consumed = typeof o.consumedDraftId === 'string' ? o.consumedDraftId : null
+    if (o.draftConsumed === true && typeof o.envelopeHash === 'string' && consumed !== null && selected === consumed) {
+      void openThing(o.envelopeHash)
+    }
   } else showText(`Publish failed: ${String(o.reason ?? o.status)}`, 'danger')
 })
 shell.onOpenSharing(() => openTransfersModal())

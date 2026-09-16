@@ -2877,6 +2877,11 @@ app.whenReady().then(async () => {
           if (current?.draftId === p.draftId) destroyCurrent({ flush: false })
           library.deleteDraft(p.draftId)
           outcome.draftConsumed = true
+          // WHICH draft, so the chrome can tell whether it is still looking at
+          // it. "Land on the signed instance" is only right for someone who
+          // was watching that draft; the result arrives asynchronously, and by
+          // then the view may have moved on.
+          outcome.consumedDraftId = p.draftId
           notifyFeedChanged()
         }
         return outcome
