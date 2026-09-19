@@ -1,4 +1,4 @@
-# electron-builder — installers for the SHELL (the trusted client).
+# electron-builder — installers for Souspli (in the code: the shell, the trusted client).
 #
 # The packaged app launches the shell: package.json `main` is
 # out/main/shell/main.js (so `electron .`, `pnpm start`, `pnpm dev`, and the
@@ -17,9 +17,13 @@
 # macOS Gatekeeper (right-click → Open, or `xattr -dr com.apple.quarantine`),
 # Windows SmartScreen (More info → Run anyway). Add certs later — see README.
 
-appId: dev.gearcat.shell
-productName: Shell
-copyright: © 2026
+# appId is the update + signing identity. Changing it after a signed release
+# strands every installed copy, so it is settled here, before the first one.
+appId: org.souspli.app
+productName: Souspli
+executableName: souspli
+artifactName: Souspli-${version}-${os}-${arch}.${ext}
+copyright: © 2026 Souspli contributors
 
 directories:
   output: release
@@ -38,8 +42,8 @@ files:
 # same admission gate — arriving by double-click grants a bundle nothing).
 fileAssociations:
   - ext: thing
-    name: Thing bundle
-    description: A signed thing bundle
+    name: Souspli letter
+    description: A signed Souspli letter
     mimeType: application/x-thing
     role: Viewer
 
@@ -82,7 +86,7 @@ linux:
   category: Network
   icon: build/icon.png
   maintainer: gearcat0 <large.oil2707@fastmail.com>
-  synopsis: A trusted client for decentralized, self-contained signed content ("things")
+  synopsis: Signed, self-contained letters exchanged between people, with no server in the middle
 
 # No auto-publish; the release workflow attaches artifacts to a GitHub Release.
 publish: null

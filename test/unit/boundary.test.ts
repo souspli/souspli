@@ -48,7 +48,7 @@ describe('module boundary: the cage imports neither shell nor format', () => {
           spec.includes('/format/') ||
           spec.endsWith('/shell') ||
           spec.endsWith('/format') ||
-          spec.includes('@yourproject/format')
+          spec.includes('@souspli/format')
       )
       expect(bad, `forbidden imports in ${file}: ${bad.join(', ')}`).toEqual([])
     })

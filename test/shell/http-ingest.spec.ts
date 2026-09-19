@@ -266,7 +266,7 @@ test('the disclosure names the host, and says a URL is not content-addressed', a
   // The rest is on hover, because the topbar is one 48px row and the cage is
   // composited above anything drawn below it.
   expect(d.title).toMatch(/not content-addressed/i)
-  expect(d.title).toMatch(/not that it is the thing you asked for/i)
+  expect(d.title).toMatch(/not that it is the letter you asked for/i)
 })
 
 test('a magnet discloses the swarm; local locators disclose nothing', async () => {

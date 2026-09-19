@@ -121,7 +121,7 @@ export interface ParsedThingEvent {
 export function parseThingEvent(raw: unknown, maxBundleBytes: number): ParsedThingEvent | { error: string } {
   const ev = raw as NostrEvent
   if (!ev || typeof ev !== 'object') return { error: 'not an object' }
-  if (ev.kind !== THING_KIND) return { error: `kind ${String(ev.kind)} is not a thing` }
+  if (ev.kind !== THING_KIND) return { error: `kind ${String(ev.kind)} is not a letter` }
   for (const f of ['id', 'pubkey', 'sig', 'content'] as const) {
     if (typeof ev[f] !== 'string') return { error: `missing ${f}` }
   }
@@ -138,7 +138,7 @@ export function parseThingEvent(raw: unknown, maxBundleBytes: number): ParsedThi
   }
 
   const envelopeHash = firstTag(ev, TAG.hash)
-  if (!envelopeHash || !/^[0-9a-f]{64}$/.test(envelopeHash)) return { error: 'no usable thing hash' }
+  if (!envelopeHash || !/^[0-9a-f]{64}$/.test(envelopeHash)) return { error: 'no usable letter hash' }
 
   let bundle: Uint8Array | null = null
   if (ev.content.length > 0) {

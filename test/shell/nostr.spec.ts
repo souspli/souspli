@@ -384,7 +384,7 @@ test('the relay window says what a relay costs you, and adding one connects', as
     const { outcome } = await shell.compose(NAMETAG.toString('base64'), 'nametag')
     await chromeEval(`window.__shellChrome.openShare(${JSON.stringify(outcome.envelopeHash)}, 'nametag')`)
     const share = await chromeEval<string>("document.querySelector('[data-testid=share-modal]').textContent")
-    expect(share).toMatch(/posting hands this thing to every relay you have added/i)
+    expect(share).toMatch(/posting hands this letter to every relay you have added/i)
     await expect
       .poll(
         () => chromeEval<string>("document.querySelector('[data-testid=share-relay-note]')?.textContent ?? ''"),

@@ -136,7 +136,7 @@ test('bytes that are a different thing are refused, and NOTHING is kept', async 
 
   const r = await shell.fetchOffer(wanted.hash)
   expect(r.status).toBe('invalid')
-  expect(String(r.reason)).toMatch(/different thing/i)
+  expect(String(r.reason)).toMatch(/different letter/i)
 
   // Neither the thing asked for nor the one that turned up.
   const feed = await shell.feed({ limit: 200 })
@@ -148,7 +148,7 @@ test('bytes that are a different thing are refused, and NOTHING is kept', async 
   // source rather than vanishing.
   const offer = (await offerFor(wanted.hash))!
   expect(offer.state).toBe('failed')
-  expect(String(offer.reason)).toMatch(/different thing/i)
+  expect(String(offer.reason)).toMatch(/different letter/i)
 })
 
 test('a file: locator from a relay is refused without touching the path', async () => {

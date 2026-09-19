@@ -1,4 +1,4 @@
-// @yourproject/conformance — the format half of the interop suite.
+// @souspli/conformance — the format half of the interop suite.
 //
 // The committed ./vectors/*.json are the language-agnostic artifact: a second
 // implementation proves interop by running exactly these against its own code.

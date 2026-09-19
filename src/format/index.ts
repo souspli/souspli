@@ -1,4 +1,4 @@
-// @yourproject/format — the thing format.
+// @souspli/format — the thing format.
 // Canonical CBOR, hashing, signing/verification, sealed envelopes, and the
 // bundle admission algorithm. Pure TypeScript: no UI, no Electron, no network.
 

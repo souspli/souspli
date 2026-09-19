@@ -3,7 +3,7 @@
 The implementation of the format spec (`gearcat0/format`,
 `FORMAT_SPEC_DRAFT.md`). It lives inside this repo for now so the whole system
 builds and tests together; it is written to be extracted into its own package
-(`@yourproject/format`) later with a `git mv` — nothing here imports from the
+(`@souspli/format`) later with a `git mv` — nothing here imports from the
 shell or the cage.
 
 The **spec** is the separate `gearcat0/format` repo (spec only, no code). When

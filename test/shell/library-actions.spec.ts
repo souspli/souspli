@@ -136,7 +136,7 @@ test('deleting the open thing closes it and clears the header', async () => {
   await poll(feed, (f) => f.filter((x) => x.type === 'nametag').length === 1)
   await poll(modeState, (s) => s === null) // cages destroyed
   const headerText = await chromeEval<string>(`document.querySelector('.sh-thing-header').textContent`)
-  expect(headerText).toContain('Select a thing')
+  expect(headerText).toContain('Select a letter')
   const reopen = await shell.openThing(copyHash)
   expect(reopen.error).toBeTruthy()
 })

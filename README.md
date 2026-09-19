@@ -197,8 +197,8 @@ pnpm pack:dir      # unpacked app in release/, no installer — quick local chec
 
 Alpha builds are **unsigned**, so first launch shows a warning the tester
 bypasses once: macOS Gatekeeper (right-click → **Open**, or
-`xattr -dr com.apple.quarantine "/Applications/Shell.app"`); Windows SmartScreen
-(**More info → Run anyway**); Linux `chmod +x Shell-*.AppImage`. To sign later,
+`xattr -dr com.apple.quarantine "/Applications/Souspli.app"`); Windows SmartScreen
+(**More info → Run anyway**); Linux `chmod +x Souspli-*.AppImage`. To sign later,
 add an Apple Developer ID + notarization creds (macOS) and a code-signing cert
 (Windows) as CI secrets — electron-builder reads them from the environment; no
 config change beyond providing the certs.
