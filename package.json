@@ -26,6 +26,7 @@
     "postinstall": "electron-rebuild -f -o better-sqlite3 || true",
     "gen:vectors": "tsx src/conformance/generate.ts",
     "gen:welcome": "tsx tools/welcome/make.ts",
+    "welcome:forum": "tsx tools/welcome/forum.ts",
     "world": "node scripts/run-world.mjs",
     "test:unit": "vitest run",
     "test:cage": "pnpm build && node scripts/run-cage-tests.mjs",

@@ -46,6 +46,10 @@ relays.
 
 - **File → Relays…** → **Add relay** (`wss://…`). The list starts **empty**:
   Souspli connects to nothing you did not add.
+- The project runs one, `wss://relay.souspli.org`, and the app will *suggest* it —
+  under **Find people…** when nothing is open, and in the empty Relays and Forums
+  windows. Suggesting is all it does: a dialog says what adding it costs you, and
+  nothing is contacted until you say yes. [What it keeps](../../relay/README.md).
 - **Share… → Post to relays** hands the letter to every relay on your list.
 - Small letters (up to 32 KiB) travel whole. Larger ones are posted as a *pointer*
   — a hash and a magnet link — so you must be seeding it first.

@@ -162,6 +162,10 @@ const shell = {
     since: number
   }> => ipcRenderer.invoke('shell:relays'),
   addRelay: (url: string): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:relay-add', url),
+  /** The project's suggested relay and welcome forum: what is on offer, and
+   *  the one call that acts on the human's yes. Never invoked on load. */
+  community: (): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:community'),
+  joinCommunity: (): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:community-join'),
   removeRelay: (url: string): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:relay-remove', url),
   postToRelays: (envelopeHash: string): Promise<Record<string, unknown>> =>
     ipcRenderer.invoke('shell:relay-post', envelopeHash),
