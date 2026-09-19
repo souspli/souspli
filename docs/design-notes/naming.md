@@ -1,3 +1,8 @@
+> **Design note — 2026-07-23.** A decision record, written when this was built and kept as
+> written. It uses the code's names (*thing*, *shell*, *cage* — see the
+> [glossary](../glossary.md)) and may describe things that have since changed.
+> Current documentation: [locators](../how/protocol/locators.md).
+
 # Build brief — naming
 
 Phase 5, and the last piece before conformance. Transport answered *how* bytes

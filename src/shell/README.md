@@ -1,5 +1,10 @@
 # src/shell — the trusted client
 
+> To users this is **Souspli**, and a *thing* is a **letter** — see the
+> [glossary](../../docs/glossary.md). For an overview, start at
+> [the architecture docs](../../docs/how/architecture/overview.md); this file is the
+> detailed, code-level companion.
+
 The shell is the first component that inverts the cage's "nothing to steal"
 posture: it holds the keyring, parses hostile bundles, and mounts admitted
 things into cages. It is the trusted process with the crown jewels; its threat
@@ -39,8 +44,13 @@ src/shell/
 ├── naming/      name → author key (identity) + name → locator (discovery). A
 │                name is shown as VERIFIED only when it provably maps to the
 │                thing's signature-proven author key. ENS via an injected
-│                EnsClient (viem for live, mock-tested); reverse+forward
-│                confirmed. Direct locators pass through; Nostr stubbed.
+│                EnsClient (mock-tested; the live viem client is NOT a shipped
+│                dependency, so names are unresolvable in real builds);
+│                reverse+forward confirmed. Direct locators pass through;
+│                Nostr naming stubbed.
+├── nostr/       relays: one socket per relay, kind-3400 events, inline bundle
+│                or pointer → OFFER. Untrusted for content like any transport.
+├── starters/    the built-in types, bundled byte-for-byte from samples/*.html.
 ├── chrome/      the trusted 3-pane renderer (omnibar, feed, per-thing trust
 │                header, confirm dialogs). Vanilla TS + the evm-ui design
 │                language (CSS tokens/classes, no framework). Every trust signal
@@ -113,8 +123,10 @@ own feed section, never leave the machine, and their header says DRAFT, never
 saved via a native dialog, and admitted + seeded locally like any other thing (so
 you see your own creation, and it is re-servable by `bundle:<hash>`). Authoring is
 the mirror of admission and lives in `format`; the shell only supplies the
-`Signer`. Public things only for now — sealed authoring is deferred with the rest
-of sealing. Sharing this phase is **file handoff**; live P2P is the fast-follow.
+`Signer`. Public things only for now — sealed authoring is deferred (sealed things
+can be admitted and opened, not written). Sharing is by file, pasted bundle,
+BitTorrent magnet, or a post to relays — each an explicit act; see Transfers and
+`nostr/`.
 
 **Export** writes the open thing to a `.thing` file you can carry anywhere.
 Deliberately a byte-for-byte copy of the bundle as it was admitted, taken from

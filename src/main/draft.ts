@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto'
 // LATER: inline blobs carry no MIME type in the publish contract, so the table
 // records application/octet-stream; the real MIME is decided at review time
 // (or the contract grows a per-blob mime — a format-spec question, noted in
-// FORMAT_SPEC_NOTES.md).
+// docs/design-notes/format-spec-notes.md).
 
 export interface DraftCaps {
   maxTypeLen: number
