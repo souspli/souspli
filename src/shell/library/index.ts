@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { CasStore, EphemeralStore, type AttachmentStore } from '../../main/store.js'
+import { claimedTitle } from './title.js'
 import {
   decodeManifest,
   toHex,
@@ -28,6 +29,10 @@ export interface ThingRow {
   /** YOUR name for the author, if you have given one. Local, never in a thing,
    *  and never a substitute for a verified name — see the chrome. */
   petname?: string | null
+  /** What the thing CALLS ITSELF -- a sanitized line out of its args, so the
+   *  author's claim and nothing more (see title.ts). Null when it offers none,
+   *  and always null for a sealed thing: its words never reach sqlite. */
+  title?: string | null
   type: string
   progHash: string
   manifestHash: string
@@ -312,6 +317,7 @@ function toThingRow(r: Row): ThingRow {
     // Your name for the author, when the query joined it. Local only; a row
     // read without the join simply has none.
     petname: (r as Row & { petname?: string | null }).petname ?? null,
+    title: (r as Row & { title?: string | null }).title ?? null,
     signatures: (r as Row & { signatures?: number }).signatures ?? 1,
     cosignable: ((r as Row & { cosignable?: number }).cosignable ?? 0) === 1
   }
@@ -528,6 +534,15 @@ export class Library {
         prev          TEXT NOT NULL
       );
 
+      -- What each thing calls itself, for the feed. Derived from args at store
+      -- time (title.ts) so a feed of 200 rows decodes no manifests. Its own
+      -- table rather than a column on things: CREATE is allowed where ALTER is
+      -- not. PUBLIC things only -- a sealed thing's words never reach sqlite.
+      CREATE TABLE IF NOT EXISTS titles (
+        envelope_hash TEXT PRIMARY KEY,
+        title         TEXT NOT NULL
+      );
+
       -- What a draft is AMENDING, until it is published and the envelope
       -- carries it instead. A separate table because the drafts table cannot
       -- gain columns (no schema versioning), and because most drafts amend
@@ -611,6 +626,7 @@ export class Library {
       CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
     `)
     this.backfillRefs()
+    this.backfillTitles()
   }
 
   /** A one-way marker for something that must happen at most once per library
@@ -685,6 +701,36 @@ export class Library {
       /* backfill is best-effort; the library must still open */
     }
     this.db.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)').run('refs_backfill_v3', '1')
+  }
+
+  /** Libraries from before titles existed hold things that have never been
+   *  asked what they call themselves. Same shape and the same rule as the refs
+   *  pass: public things only, best-effort, never allowed to stop the open.
+   *  Versioned so that a change to what counts as a title can re-run it. */
+  private backfillTitles(): void {
+    if (this.metaGet('titles_backfill_v1')) return
+    try {
+      const rows = this.db.prepare('SELECT envelope_hash, manifest_hash FROM things WHERE sealed = 0').all() as {
+        envelope_hash: string
+        manifest_hash: string
+      }[]
+      const insert = this.db.prepare('INSERT OR REPLACE INTO titles (envelope_hash, title) VALUES (?,?)')
+      this.db.transaction(() => {
+        for (const r of rows) {
+          const bytes = this.cas.readAll(r.manifest_hash)
+          if (!bytes) continue
+          try {
+            const title = claimedTitle(decodeManifest(bytes).args)
+            if (title) insert.run(r.envelope_hash, title)
+          } catch {
+            /* undecodable manifest — skip it, never fail the open */
+          }
+        }
+      })()
+    } catch {
+      /* backfill is best-effort; the library must still open */
+    }
+    this.db.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)').run('titles_backfill_v1', '1')
   }
 
   /** How many things in this library claim to reply to `targetHash`. */
@@ -825,6 +871,13 @@ export class Library {
         this.db
           .prepare('INSERT OR REPLACE INTO thing_enc (envelope_hash, scheme, key) VALUES (?,?,?)')
           .run(envelopeHash, env.author.e, toHex(env.author.ek))
+      }
+
+      // What it calls itself, for the feed. A claim like the rest of args, and
+      // sanitized before it is ever stored: see title.ts for the terms.
+      const title = claimedTitle(result.manifest.args)
+      if (title) {
+        this.db.prepare('INSERT OR REPLACE INTO titles (envelope_hash, title) VALUES (?,?)').run(envelopeHash, title)
       }
 
       // What this version claims to follow, so the claim can be checked later.
@@ -976,6 +1029,7 @@ export class Library {
     const rows = this.db
       .prepare(
         `SELECT t.*, p.name AS petname,
+                (SELECT ti.title FROM titles ti WHERE ti.envelope_hash = t.envelope_hash) AS title,
                 (SELECT COUNT(*) FROM things t3 WHERE t3.manifest_hash = t.manifest_hash) AS signatures,
                 EXISTS (SELECT 1 FROM doc_signers d2 WHERE d2.manifest_hash = t.manifest_hash) AS cosignable
            FROM things t${join}
@@ -1275,7 +1329,8 @@ export class Library {
   chainHistory(authorKey: string, path: string): ThingRow[] {
     const rows = this.db
       .prepare(
-        `SELECT t.*, p.name AS petname, 1 AS signatures, 0 AS cosignable
+        `SELECT t.*, p.name AS petname, 1 AS signatures, 0 AS cosignable,
+                (SELECT ti.title FROM titles ti WHERE ti.envelope_hash = t.envelope_hash) AS title
            FROM things t
            LEFT JOIN petnames p ON p.author_scheme = t.author_scheme AND p.author_key = t.author_key
           WHERE t.author_key = ? AND t.path = ?
@@ -1637,7 +1692,9 @@ export class Library {
   get(envelopeHash: string): ThingRow | null {
     const r = this.db
       .prepare(
-        `SELECT t.*, p.name AS petname FROM things t
+        `SELECT t.*, p.name AS petname,
+                (SELECT ti.title FROM titles ti WHERE ti.envelope_hash = t.envelope_hash) AS title
+           FROM things t
            LEFT JOIN petnames p ON p.author_scheme = t.author_scheme AND p.author_key = t.author_key
           WHERE t.envelope_hash = ?`
       )
@@ -1696,6 +1753,7 @@ export class Library {
       // they are still real, the target just is not local any more — which is
       // exactly what the reply's header then says.
       this.db.prepare('DELETE FROM refs WHERE envelope_hash = ?').run(envelopeHash)
+      this.db.prepare('DELETE FROM titles WHERE envelope_hash = ?').run(envelopeHash)
       // Stop remembering that we were serving it. The live torrent is stopped
       // by the caller (deleteThing); this is the record that would otherwise
       // resume seeding a thing the human deleted, on the next start.

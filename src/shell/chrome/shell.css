@@ -162,6 +162,20 @@ body {
   font-size: var(--evm-text-xs);
   margin-top: 2px;
 }
+/* What a letter calls itself. Secondary ink and below the author line on
+   purpose: it is the author's claim, and the signer is what a row leads with.
+   One line, ellipsised; `isolate` so a right-to-left title cannot reorder the
+   cells around it. */
+.sh-feed-called {
+  color: var(--evm-text-2);
+  font-size: var(--evm-text-sm);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  unicode-bidi: isolate;
+  margin-top: 2px;
+}
 .sh-unread {
   color: var(--evm-accent);
   font-size: 10px;

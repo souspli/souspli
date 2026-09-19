@@ -120,6 +120,9 @@ Stated in the [specification §10](../protocol/spec.md) and on the
   ciphertext.
 - **`type` is untrusted** and exists anyway; any field that must not be trusted will
   eventually be trusted by someone.
+- **Feed titles are author-supplied text in trusted territory.** Sanitised, plain
+  text, visibly secondary and never able to carry a ✓ — but still a sentence a
+  stranger chose, sitting next to a verified author. Treat it like a subject line.
 - **Votes are signed without a confirmation dialog**, on the grounds that the control
   is in the trusted header. If a program could ever cause a vote to be cast, that is
   where it would break.
