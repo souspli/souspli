@@ -29,6 +29,27 @@ therefore checked on every build rather than merely asserted. `public/_headers` 
 a `Content-Security-Policy` of `default-src 'none'` so a browser would refuse them
 anyway.
 
+## And what visitors actually receive
+
+The build gate proves what is *published*. A CDN can still rewrite HTML at the edge —
+and Cloudflare did: zone-level Web Analytics injected a beacon `<script>` into every
+page of souspli.org while the same deployment on `pages.dev` stayed clean. The CSP
+blocked it, but the markup was there.
+
+```bash
+npm run check:live      # SITE_URL=https://… to point it elsewhere
+```
+
+fetches every page **with a browser's navigation headers** (edge injection ignores a
+bare `curl`) and fails on a served `<script>`, a cookie, a missing CSP, or an
+over-budget page. `.github/workflows/site-live.yml` runs it daily and after each
+deploy, because a dashboard toggle can change the answer with no commit.
+
+Cloudflare settings that must stay **off** for the zone: Web Analytics / RUM
+(automatic setup), Rocket Loader, Email Address Obfuscation, Automatic HTTPS
+Rewrites. Network Error Logging only reports load *failures*, but it reports them to
+a third party; the check warns about it.
+
 ## How pages are made
 
 - Every `docs/**/*.md` becomes a page; `foo/index.md` → `/foo/`, `foo/bar.md` →
