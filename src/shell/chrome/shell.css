@@ -626,3 +626,13 @@ body {
   gap: var(--evm-space-2);
   margin: var(--evm-space-2) 0;
 }
+
+/* A moderator's controls under a forum post: quiet, right-aligned, and outside
+   the row's own button. */
+.sh-forum-mod {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--evm-space-2);
+  padding: 0 var(--evm-space-3) var(--evm-space-2);
+}

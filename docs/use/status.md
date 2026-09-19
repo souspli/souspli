@@ -17,8 +17,8 @@ macOS, Windows and Linux):
 - Writing, publishing, versioning, copying and exporting letters; the fifteen
   built-in [types](types.md); drafts with attachments.
 - Comments and threads, attestations, co-signed documents, votes.
-- Groups and forums: rosters, join requests, tribe-weighted ranking, folding of
-  moderated posts.
+- Groups and forums: rosters, join requests, posting and replying from the app,
+  tribe-weighted ranking, moderators' verdicts and the folding of hidden posts.
 - Petnames, vouches, and the depth-two tribe.
 - Transports: file, paste, double-click, `bundle:` by hash, BitTorrent magnets with
   resumable background transfers, and Nostr relays with on-demand offers.
@@ -28,7 +28,6 @@ macOS, Windows and Linux):
 | Missing | What it means for you |
 |---|---|
 | **Writing sealed (private) letters** | The format supports encrypted letters and Souspli can *open* them, but there is no way to *write* one from the app. Everything you publish is readable by whoever gets the file. |
-| **A moderator's button** | Moderation verdicts (hide / endorse) are verified, honoured and displayed, but the app has no control for a moderator to issue one. |
 | **Verified names (ENS)** | The logic is written and tested, but the library it needs is not shipped and there is no setting for an Ethereum node. In current builds no name is ever shown as verified; you have petnames. |
 | **Key rotation and revocation** | A stolen key signs as you forever. No mechanism yet. |
 | **Recovery phrase for an existing key** | A phrase is shown only when an identity is generated. Afterwards the only backup is the raw private key. |

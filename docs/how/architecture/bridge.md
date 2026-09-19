@@ -77,7 +77,9 @@ Blob values take three forms:
 | `{ carry: true }` | "keep the attachment of this name that you already hold" — resolved client-side, so megabytes do not cross IPC per keystroke |
 
 `args` and `blobs` are **whole-set replacement**: a program re-declares everything it
-wants to keep on every emit.
+wants to keep on every emit. One thing is laid back over the result before anything
+reads it: the pointers the client itself seeded into the draft
+([relations](../protocol/relations.md)), which no program can drop or retarget.
 
 There is no `emit('publish')`. Programs cannot initiate a publish; every control
 that signs anything lives in the header.

@@ -39,9 +39,10 @@ cannot create their own instances.
   `getArgs().mode`; the toggle itself is in the header. Both stay mounted while the letter is open, so in-progress edits survive
   toggling.
 - **`args` and `blobs` are whole-set replacement.** Re-declare everything you want to
-  keep on every emit. If your letter refers to another (`replyTo`, `attests`,
-  `inGroup`, `votesOn`), echo that field every time or the letter silently detaches
-  from its subject.
+  keep on every emit. The exception is pointers Souspli itself seeded — `replyTo`,
+  `attests`, `votesOn`, `inGroup`, `verdict` — which it keeps and re-applies over
+  whatever you emit, so a type need not know that forums exist to be posted in one.
+  Echoing them is harmless; trying to change them does nothing.
 - **Attachments:** freshly picked bytes as `{ bytes, mime }`; ones you already hold
   as `{ carry: true }` so megabytes do not move per keystroke. Never rename an
   attachment you are carrying — the name is how it is found. You can display your

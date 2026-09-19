@@ -37,8 +37,14 @@ Indexed by the reference library as `(from, rel, to)` where `to` is a 64-hex
 | `votesOn` | `vote` | This is a vote on that. |
 | `inGroup` | any type | This belongs to the forum whose **root** group letter is that. Also carried by `join-request` and by moderators' verdicts. |
 
-Because `args` is replaced whole on every edit, a program must echo these fields on
-every draft it emits, or the letter silently detaches from its subject.
+`args` is replaced whole by every draft a program emits, and a program has usually
+never heard of most of these fields — an article knows nothing about forums. So a
+client must **keep the pointers it seeded** and lay them back over every emitted
+draft, with its own value winning: the person pressed *Comment* on a particular
+letter, or *Write a post* in a particular forum, and the program does not get to
+drop or retarget that. The reference client records them with the draft
+(`library/pins.ts`), together with `verdict`. A pointer the person *typed* into a
+program is ordinary program state and stays editable.
 
 ### Votes
 

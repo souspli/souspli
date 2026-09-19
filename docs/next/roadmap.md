@@ -11,7 +11,6 @@ Nothing here is a promise or has a date.
 | | Why it matters |
 |---|---|
 | **Writing sealed letters** | The format, the cryptography and the receiving side are done and tested. What is missing is the interface: choosing recipients, and saying plainly at the moment of sealing that *any recipient can forward it*. Until then Souspli has no private mode. |
-| **A moderator's controls** | Verdicts are verified and displayed; a moderator needs a button to issue one. |
 | **Signed installers and auto-update** | Nobody should have to click through an OS warning, or check a web page for security fixes. |
 | **Somewhere to go** | A new install now opens onto a welcome letter, but then there is nobody to talk to. A welcome forum and a suggested relay — *offered*, with the usual disclosure, never connected silently. |
 | **Key rotation and revocation** | The largest gap in the design. Likely a signed, chained statement from the old key naming its successor, discoverable the same way new versions are. |

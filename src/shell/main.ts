@@ -19,6 +19,7 @@ import {
 } from './library/index.js'
 import { STARTERS, starterByKey, starterBytes } from './starters/index.js'
 import { WELCOME_FLAG, welcomeBundle } from './welcome/index.js'
+import { applyPins, pinsOf, type Pins } from './library/pins.js'
 import { mountThing, type MountedThing } from './mount/index.js'
 import { TransportService, FileTransport, HttpTransport, SeedTransport } from './transport/index.js'
 import { TorrentService, displayNameOf, infoHashOf } from './torrent/index.js'
@@ -604,6 +605,11 @@ app.whenReady().then(async () => {
     /** Non-null when this open thing is a local, UNSIGNED draft. Every draft
      *  branch keys off THIS — never off re-parsing the id. */
     draftId: string | null
+    /** Pointers the shell owns (library/pins.ts), laid over every draft the
+     *  program emits. For a draft: what the shell seeded it with. For a signed
+     *  thing opened for editing: the pointers it already carries, so that
+     *  republishing a forum post keeps it in its forum. */
+    pins: Pins
     /** Autosave: the last streamed draft, and its debounce timer. */
     pendingSave: Draft | null
     saveTimer: ReturnType<typeof setTimeout> | null
@@ -915,6 +921,15 @@ app.whenReady().then(async () => {
     })
   }
 
+  /** The pointers a signed thing already carries, as pins for an edit of it. */
+  function pinsOfStored(args: unknown): Pins {
+    try {
+      return pinsOf(cborToJs(args as never))
+    } catch {
+      return {}
+    }
+  }
+
   let pendingOpen: string | null = null
   function announceOpened(envelopeHash: string): void {
     pendingOpen = envelopeHash
@@ -990,6 +1005,7 @@ app.whenReady().then(async () => {
       latestDraftMeta: null,
       lastPreviewKey: null,
       draftId: draft ? draft.id : null,
+      pins: draft ? library.draftPins(draft.id) : pinsOfStored(stored.manifest.args),
       pendingSave: null,
       saveTimer: null,
       activeMode: 'view',
@@ -2017,6 +2033,11 @@ app.whenReady().then(async () => {
       return
     }
     const publishableBefore = o.latestDraft != null
+    // The shell's pointers go back over whatever the program sent BEFORE
+    // anything reads the draft, so the preview, the autosave and the signature
+    // all see the same args. (Mutating req.draft is deliberate: every use
+    // below reads it.)
+    if (Object.keys(o.pins).length > 0) req.draft = { ...req.draft, args: applyPins(req.draft.args, o.pins) }
     // The latest draft is what the chrome Publish button signs.
     o.latestDraft = req.draft
     o.latestDraftMeta = { argsBytes: req.argsBytes, blobBytes: req.blobBytes }
