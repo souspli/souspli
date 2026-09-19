@@ -76,8 +76,8 @@ footer a{color:inherit}
 {{ content | safe }}
 </div></main>
 <footer><div class="wrap{% if landing %} wide{% endif %}">
-<p>This site makes no third-party requests, sets no cookies and runs no JavaScript.{% if sourcePath and not landing %} · <a href="{{ repoUrl }}/blob/master/{{ sourcePath }}">Edit this page</a>{% endif %}</p>
-<p><em>sous pli</em> — under sealed cover · <a href="{{ repoUrl }}">Source</a> · <a href="/use/status/">Alpha status</a> · <a href="{{ repoUrl }}/blob/master/SECURITY.md">Security</a> · Apache-2.0</p>
+{% if sourcePath and not landing %}<p><a href="{{ repoUrl }}/blob/master/{{ sourcePath }}">Edit this page</a></p>
+{% endif %}<p><em>sous pli</em> — under sealed cover · <a href="{{ repoUrl }}">Source</a> · <a href="/use/status/">Alpha status</a> · <a href="{{ repoUrl }}/blob/master/SECURITY.md">Security</a> · Apache-2.0</p>
 </div></footer>
 </body>
 </html>

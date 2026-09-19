@@ -1,9 +1,9 @@
 name: site-live
 
 # What visitors RECEIVE, as opposed to what we built. The build gate in test.yml
-# cannot see edge-side rewrites (an injected analytics beacon, a loader, email
-# obfuscation); this fetches souspli.org the way a browser does and fails if the
-# served HTML carries a script, a cookie, or a weakened CSP.
+# cannot see what a CDN does to the HTML afterwards; this fetches souspli.org the
+# way a browser does and fails on anything unexpected in the served pages.
+# (Cloudflare's own Web Analytics beacon is expected and allowed.)
 
 on:
   schedule:
