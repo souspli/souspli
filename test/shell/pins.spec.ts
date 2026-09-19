@@ -201,6 +201,11 @@ test('a moderator gets Hide and Endorse; pressing one starts a verdict draft, si
   expect((await shell.forumListing(forum)).rows.find((r) => r.envelopeHash === post.envelopeHash)!.verdict).toBeNull()
 
   // The draft opened for them; saying why and publishing makes it one.
+  // Opened AGAIN, through main, and awaited: the chrome's own open was started
+  // by the click and nothing here waited for it, so on a slow runner the
+  // previous test's letter was still the one mounted and the note was typed
+  // into ITS editor. (Re-opening the same id is a mode reset, not a remount.)
+  await shell.openThing(draft.id)
   expect(await type('#edit-note', 'Useful and on topic.')).toBe('ok')
   await expect.poll(async () => (await draftArgs(draft.id)).note, { timeout: 10_000 }).toBe('Useful and on topic.')
   await publish()
