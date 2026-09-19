@@ -27,7 +27,7 @@ shows `—`). The **View | Edit** toggle in the shell's trusted header — not i
 the program — switches to Edit mode. As you edit, the program streams its
 working state with `bridge.emit('draft', {type, args})` (grants nothing); the
 shell renders it live — switch to View and you see the draft in its final
-form, under a "PREVIEW — unpublished draft" badge instead of "✓ signed" — and
+form, under a "PREVIEW — unsigned" badge instead of "✓ signed" — and
 the header's **Publish** button signs EXACTLY that latest draft after you
 confirm. A new instance — same program, `args: {name}` — appears in your feed.
 In-progress edits survive toggling back and forth: both modes stay mounted

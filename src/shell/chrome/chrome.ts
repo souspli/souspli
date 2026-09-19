@@ -807,7 +807,7 @@ async function openNewMenu(): Promise<void> {
   // views for longer than the modal is actually up.
   const types = await shell.knownTypes()
   const overlay = el('div', 'evm-modal-overlay')
-  const modal = el('div', 'evm-modal')
+  const modal = el('div', 'evm-modal sh-new-modal')
   modal.setAttribute('data-testid', 'new-menu')
   const header = el('div', 'evm-modal-header')
   header.append(el('span', 'evm-modal-title', 'New'))
@@ -2764,6 +2764,8 @@ function renderWelcomePane(show: boolean): void {
 
 function renderHeader(h: HeaderFacts | null): void {
   thingHeader.replaceChildren()
+  refitHeader = null
+  thingHeader.classList.remove('sh-thing-header--tight')
   // Which thing this row is describing. The header is rebuilt per open, so
   // anything filled in asynchronously must check this before touching it.
   if (h) thingHeader.setAttribute('data-envelope-hash', h.envelopeHash)
@@ -2790,7 +2792,11 @@ function renderHeader(h: HeaderFacts | null): void {
   trustBadge = badge
   // Hidden until view mode shows an unpublished-draft preview (see
   // styleModeButtons) — then it REPLACES the trust badge.
-  previewBadge = el('span', 'evm-badge evm-badge--warning', 'PREVIEW — unpublished draft')
+  // Short on purpose: the status slot is sized to the WIDER of its two badges
+  // for the life of the header, so every character here is width the row pays
+  // for even while it says "✓ signed". The tooltip carries the sentence.
+  previewBadge = el('span', 'evm-badge evm-badge--warning', 'PREVIEW')
+  previewBadge.title = 'A preview of your unpublished draft. Nothing here is signed until you press Publish and confirm.'
   previewBadge.setAttribute('data-testid', 'preview-badge')
   previewBadge.style.visibility = 'hidden'
   // Both badges share one grid cell; the slot is permanently sized to the
@@ -2889,6 +2895,13 @@ function renderHeader(h: HeaderFacts | null): void {
   // target's author never consented. So: never the ✓ vocabulary, always scoped
   // to "your library", and honest when the target is missing.
   const replyBits: HTMLElement[] = []
+  // The rarer actions. This row carried sixteen things and scrolled sideways
+  // even in a 1440px window; what is left in it is what you read (who, what,
+  // whether it is signed, how it relates to what you hold) and what you do
+  // often (mode, Publish, Comment, vote, Share). These go behind "⋯".
+  const moreItems: { btn: HTMLElement; hint: string }[] = []
+  let commentEl: HTMLElement | null = null
+  let groupChip: HTMLElement | null = null
   if (!h.draft) {
     const commentBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Comment')
     commentBtn.setAttribute('data-testid', 'header-comment')
@@ -2900,12 +2913,16 @@ function renderHeader(h: HeaderFacts | null): void {
       }
       await openThing(r.id)
     })
+    commentEl = commentBtn
     replyBits.push(commentBtn)
 
     const count = h.replyCount ?? 0
     repliesBadge = el('button', 'evm-btn evm-btn--ghost evm-btn--sm', replyLabel(count))
     repliesBadge.setAttribute('data-testid', 'header-replies')
     repliesBadge.setAttribute('data-count', String(count))
+    // "no comments" is ninety pixels of nothing in a row that has none to
+    // spare: shown once there is one. Kept in the DOM so its count is readable.
+    repliesBadge.hidden = count === 0
     // Which thing this count is about — the header is rebuilt per open, so
     // this is also how a test knows the rebuild has caught up.
     repliesBadge.setAttribute('data-envelope-hash', h.envelopeHash)
@@ -2925,12 +2942,13 @@ function renderHeader(h: HeaderFacts | null): void {
       }
       await openThing(r.id)
     })
-    replyBits.push(attestBtn)
+    moreItems.push({ btn: attestBtn, hint: 'Put your signature behind a statement about this letter.' })
 
     const attests = h.attestCount ?? 0
     attestBadge = el('button', 'evm-btn evm-btn--ghost evm-btn--sm', attestLabel(attests))
     attestBadge.setAttribute('data-testid', 'header-attestations')
     attestBadge.setAttribute('data-count', String(attests))
+    attestBadge.hidden = attests === 0 // as with comments: said once it is true
     attestBadge.setAttribute('data-envelope-hash', h.envelopeHash)
     attestBadge.addEventListener('click', () => void openAttestationsModal(h.envelopeHash))
     replyBits.push(attestBadge)
@@ -3057,6 +3075,7 @@ function renderHeader(h: HeaderFacts | null): void {
     const known = h.inGroupKnown === true
     const chip = el('span', `sh-replyto${known ? ' sh-replyto--known' : ''}`, `in ${short(h.inGroup, 6)}`)
     chip.setAttribute('data-testid', 'header-ingroup')
+    groupChip = chip
     chip.setAttribute('data-known', known ? '1' : '0')
     chip.title = known
       ? `${h.inGroup} — click to open the forum. Being tagged into a group is the author’s claim; the roster never agreed to it.`
@@ -3104,6 +3123,7 @@ function renderHeader(h: HeaderFacts | null): void {
   // reachable from your own vouches -- absence is the normal case and needs no
   // badge, and a "0" would read as a score, which this is not.
   const seatBits: HTMLElement[] = []
+  let farSeat: HTMLElement | null = null // the two-hop badge: the longest label in the row
   if (typeof h.authorHops === 'number') {
     const seat = el('span', 'evm-badge evm-badge--neutral sh-tribe-badge', tribeSeat(h.authorHops))
     seat.setAttribute('data-testid', 'header-tribe')
@@ -3112,6 +3132,7 @@ function renderHeader(h: HeaderFacts | null): void {
       h.authorHops === 1
         ? 'You have vouched for this key. That records that you know them — nothing about this letter.'
         : 'Reached through someone you vouched for. It says how you know of them, not that they are honest.'
+    if (h.authorHops === 2) farSeat = seat
     seatBits.push(seat)
   }
 
@@ -3125,17 +3146,160 @@ function renderHeader(h: HeaderFacts | null): void {
     pub,
     el('span', 'sh-spacer'),
     ...replyBits,
-    amendBtn,
-    copyBtn,
-    exportBtn,
-    delBtn
+    exportBtn
   )
-  // A draft has no envelope, so there is no hash to show.
-  if (!h.draft) thingHeader.append(el('span', 'sh-hint', 'hash'), hashEl)
+  if (h.draft) {
+    // A draft's row is short -- there is nothing signed to copy, amend, share
+    // or name by hash -- so its one other action stays where it can be seen.
+    thingHeader.append(delBtn)
+  } else {
+    moreItems.push(
+      { btn: amendBtn, hint: amendBtn.title },
+      { btn: copyBtn, hint: 'Start a new draft of your own from this letter’s content.' },
+      { btn: delBtn, hint: 'Remove it from your library. Copies already shared are unaffected.' }
+    )
+    const more = moreControl(moreItems, h.envelopeHash, hashEl)
+    thingHeader.append(more.el)
+
+    // What is in "⋯" above is there ALWAYS. These go only when the row still
+    // does not fit, in this order, and come back when it does -- so a wide
+    // window loses nothing, and a narrow one loses the least useful thing
+    // first. Past the last step the row scrolls sideways, as it always could.
+    const steps: { apply(): void; undo(): void }[] = []
+    if (farSeat) {
+      const seat = farSeat
+      const full = seat.textContent ?? ''
+      // The sentence stays in the tooltip; only the label is shortened.
+      steps.push({ apply: () => (seat.textContent = 'vouched second-hand'), undo: () => (seat.textContent = full) })
+    }
+    if (groupChip) {
+      // Half a hash identifies a forum to a reader no better than a third of
+      // one; the whole of it is in the tooltip either way.
+      const chip = groupChip
+      const full = chip.textContent ?? ''
+      steps.push({ apply: () => (chip.textContent = `in ${h.inGroup!.slice(0, 6)}…`), undo: () => (chip.textContent = full) })
+    }
+    steps.push({
+      apply: () => more.adopt(exportBtn, 'Every way this letter can leave this machine: a file, text, a magnet link, a relay.'),
+      undo: () => {
+        more.release(exportBtn)
+        thingHeader.insertBefore(exportBtn, more.el)
+      }
+    })
+    // The "3 yours" beside the score. It does not vanish -- the score's tooltip
+    // spells out both counts -- but a row that scrolls hides things less
+    // predictably than this does.
+    steps.push({
+      apply: () => thingHeader.classList.add('sh-thing-header--tight'),
+      undo: () => thingHeader.classList.remove('sh-thing-header--tight')
+    })
+    if (commentEl) {
+      // Last, and only for a letter carrying nearly everything a letter can:
+      // a petname, a seat, comments, attestations, votes and a forum.
+      const btn = commentEl
+      const next = btn.nextSibling
+      steps.push({
+        apply: () => more.adopt(btn, 'Write a reply. It is a new letter of yours that points at this one.'),
+        undo: () => {
+          more.release(btn)
+          thingHeader.insertBefore(btn, next && next.parentNode === thingHeader ? next : more.el)
+        }
+      })
+    }
+    refitHeader = () => {
+      for (const st of steps) st.undo()
+      for (const st of steps) {
+        if (thingHeader.scrollWidth <= thingHeader.clientWidth) break
+        st.apply()
+      }
+    }
+  }
   if (h.isFork) thingHeader.append(el('span', 'evm-badge evm-badge--danger', 'FORK — author history diverged'))
   // Main pushes mode-changed BEFORE shell.open returns, i.e. before these
   // elements existed — apply the cached state to the freshly built controls.
   styleModeButtons()
+  refitHeader?.()
+}
+
+/** Re-run the open header's overflow steps; null when nothing signed is open. */
+let refitHeader: (() => void) | null = null
+// The pane changes width with the window, and what fits changes with it.
+new ResizeObserver(() => refitHeader?.()).observe(thingHeader)
+
+/** "⋯": the rarer actions on the open letter, and its full hash.
+ *
+ *  A dialog rather than a dropdown, because the cage is a native view composited
+ *  ABOVE the chrome: a menu drawn under the header would open behind the letter.
+ *  Every other dialog here has the same constraint and the same answer.
+ *
+ *  The buttons are the REAL ones -- built by renderHeader with their handlers
+ *  and test ids -- parked in a hidden holder in the header and MOVED into the
+ *  dialog while it is open. One set of handlers, nothing proxied, and the ids
+ *  stay addressable whether or not the dialog is up. */
+function moreControl(
+  items: { btn: HTMLElement; hint: string }[],
+  envelopeHash: string,
+  hashEl: HTMLElement
+): { el: HTMLElement; adopt(btn: HTMLElement, hint: string): void; release(btn: HTMLElement): void } {
+  const wrap = el('span', 'sh-more')
+  const holder = el('span', 'sh-more-holder')
+  holder.hidden = true
+  // The short hash used to sit at the end of the row; it stays addressable
+  // here, and the dialog shows the WHOLE hash with a Copy beside it, which the
+  // row never had room for.
+  holder.append(...items.map((i) => i.btn), hashEl)
+  const open = el('button', 'evm-btn evm-btn--ghost evm-btn--sm', '⋯') as HTMLButtonElement
+  open.setAttribute('data-testid', 'header-more')
+  open.setAttribute('aria-label', 'More actions')
+  open.title = 'More: attest, new version, copy, delete, and the full hash'
+  open.addEventListener('click', () => {
+    const overlay = el('div', 'evm-modal-overlay')
+    const modal = el('div', 'evm-modal sh-more-modal')
+    modal.setAttribute('data-testid', 'more-menu')
+    const header = el('div', 'evm-modal-header')
+    header.append(el('span', 'evm-modal-title', 'More'))
+    const body = el('div', 'evm-modal-body')
+    for (const { btn, hint } of items) {
+      if (btn.style.display === 'none') continue
+      const row = el('div', 'sh-more-row')
+      row.append(btn, el('span', 'sh-hint', hint))
+      body.append(row)
+    }
+    body.append(copyField('Hash', envelopeHash, 'more-hash'))
+    const footer = el('div', 'evm-modal-footer')
+    const close = el('button', 'evm-btn evm-btn--ghost', 'Close')
+    const shut = (): void => {
+      // Back to the holder, so the ids resolve again and a reopen finds them.
+      // If the header was rebuilt meanwhile the holder is detached; harmless.
+      holder.prepend(...items.map((i) => i.btn))
+      overlay.remove()
+    }
+    close.addEventListener('click', shut)
+    // Choosing something is also leaving: each action opens its own dialog or
+    // another letter, and must not do so underneath this one.
+    body.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.sh-more-row button')) shut()
+    })
+    footer.append(close)
+    modal.append(header, body, footer)
+    overlay.append(modal)
+    document.body.append(trackOverlay(overlay, shut))
+  })
+  wrap.append(open, holder)
+  return {
+    el: wrap,
+    /** Take a control out of the row and into the menu (the row was too tight). */
+    adopt(btn, hint) {
+      if (items.some((i) => i.btn === btn)) return
+      items.unshift({ btn, hint }) // first: it was in plain sight a moment ago
+      holder.prepend(btn)
+    },
+    /** Give it back; the caller puts it where it belongs in the row. */
+    release(btn) {
+      const at = items.findIndex((i) => i.btn === btn)
+      if (at >= 0) items.splice(at, 1)
+    }
+  }
 }
 
 let openSeq = 0
@@ -3265,6 +3429,7 @@ shell.onFeedChanged(() => {
         if (!repliesBadge || repliesBadge.getAttribute('data-envelope-hash') !== asked) return
         repliesBadge.textContent = replyLabel(r.count)
         repliesBadge.setAttribute('data-count', String(r.count))
+        repliesBadge.hidden = r.count === 0
       })
       .catch(() => {
         /* a stale count is not worth an unhandled rejection */
@@ -3276,6 +3441,7 @@ shell.onFeedChanged(() => {
         if (!attestBadge || attestBadge.getAttribute('data-envelope-hash') !== asked) return
         attestBadge.textContent = attestLabel(r.count)
         attestBadge.setAttribute('data-count', String(r.count))
+        attestBadge.hidden = r.count === 0
       })
       .catch(() => {
         /* a stale count is not worth an unhandled rejection */
