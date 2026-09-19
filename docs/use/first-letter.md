@@ -66,6 +66,13 @@ Then look at the header. It is the only place that can tell you the truth:
 | No badge at all | A stranger. Absence is the honest signal. |
 | *version 2 of 4* | You are looking at one point in a chain; **Latest** takes you to the newest. |
 
+The feed lists each letter by **who signed it** first, and under that the line the
+letter calls itself by — an article's title, a memo's subject, the first line of a
+comment. That second line is the author's wording, not something Souspli checked: it
+is shown as plain text, in quieter ink, with anything that could imitate a ✓ or
+rearrange the row stripped out. Sealed letters show no title, because the feed's
+index is a file on disk and their words never go there.
+
 A letter can *claim* anything in its own content — "signed by the Bank of England" in
 big letters. The header is where you check.
 

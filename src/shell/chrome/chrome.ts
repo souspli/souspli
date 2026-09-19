@@ -112,6 +112,8 @@ interface ThingRow {
   envelopeHash: string
   authorScheme: string
   authorKey: string
+  /** What the letter calls itself: sanitized in main, a claim, may be absent. */
+  title?: string | null
   type: string
   receivedAt: number
   created: number
@@ -1095,6 +1097,23 @@ function isMine(row: { authorScheme: string; authorKey: string }): boolean {
   return myAuthorKey !== null && row.authorScheme === 'eth-eip191' && row.authorKey === myAuthorKey
 }
 
+/** The line a letter calls itself by, for any list of letters.
+ *
+ *  This is program-supplied text in trusted chrome, so it is held to terms: it
+ *  arrives already sanitized (library/title.ts -- one line, no controls or bidi
+ *  tricks, and no check marks, which are the chrome's word for VERIFIED); it is
+ *  set as TEXT, never markup; it sits BELOW the author line and in secondary
+ *  ink, so the signer stays the fact a row leads with; and its tooltip says
+ *  whose wording it is. Returns null when a letter offers no title -- a row
+ *  then reads exactly as it did before there were titles. */
+function titleLine(title: unknown): HTMLElement | null {
+  if (typeof title !== 'string' || title.length === 0) return null
+  const line = el('div', 'sh-feed-called', title)
+  line.setAttribute('data-testid', 'feed-title')
+  line.title = 'What this letter calls itself — the author’s wording, not something Souspli checked.'
+  return line
+}
+
 /** One feed row. Three grid cells — type | author | flags — so the author
  *  column lines up across rows regardless of how long the type name is. */
 function thingItem(row: ThingRow): HTMLElement {
@@ -1144,7 +1163,8 @@ function thingItem(row: ThingRow): HTMLElement {
     badge.setAttribute('data-replies', String(act.replies))
     meta.append(el('span', undefined, ' · '), badge)
   }
-  item.append(line1, meta)
+  const called = titleLine(row.title)
+  item.append(line1, ...(called ? [called] : []), meta)
   item.addEventListener('click', () => void openThing(row.envelopeHash))
   return item
 }
@@ -2520,7 +2540,8 @@ function forumPostBody(
   if (verdict?.verdict === 'endorse') flags.append(el('span', 'evm-badge evm-badge--success', 'endorsed'))
   line.append(flags)
   const replies = Number(row.replies ?? 0)
-  item.append(line, el('div', 'sh-feed-meta', `${replies === 1 ? '1 reply' : `${replies} replies`}`))
+  const called = titleLine(row.title)
+  item.append(line, ...(called ? [called] : []), el('div', 'sh-feed-meta', `${replies === 1 ? '1 reply' : `${replies} replies`}`))
   item.addEventListener('click', () => {
     overlay.remove()
     void openThing(String(row.envelopeHash))
@@ -2572,7 +2593,8 @@ async function openRepliesModal(target: string): Promise<void> {
       el('span', 'sh-feed-author evm-address evm-address--muted', authorLabel(row).text),
       el('span', 'sh-feed-flags')
     )
-    item.append(line, el('div', 'sh-feed-meta', fmtTime(row.receivedAt)))
+    const called = titleLine(row.title)
+    item.append(line, ...(called ? [called] : []), el('div', 'sh-feed-meta', fmtTime(row.receivedAt)))
     item.addEventListener('click', () => {
       overlay.remove()
       void openThing(row.envelopeHash)

@@ -49,6 +49,14 @@ A SQLite index (`better-sqlite3`) over a content-addressed blob store.
   tables for petnames, relays, relay arrivals, offers, transfers, seeding intent and
   drafts. When a new relation is added, a one-time backfill re-reads letters already
   held.
+- **Titles.** The one line a letter calls itself by is derived from `args` at store
+  time (`library/title.ts`) and kept in its own table, so a feed of hundreds of rows
+  decodes no manifests. It is the only program-supplied text drawn in the trusted
+  header's territory, so it is sanitised *before* it is stored — one line, 80
+  characters, no controls, bidi overrides or zero-widths, no stacked combining
+  marks, and **no check marks**, which are the chrome's word for *verified* — and
+  rendered as text, below the author, in secondary ink. Never stored for sealed
+  letters. A versioned backfill covers libraries that predate it.
 - **Tribe** is computed by a bounded frontier walk over `vouches` from your own key,
   depth 2, with a visited set. Thread walks are bounded the same way. Both are
   ordinary loops that obviously terminate rather than recursive SQL, because cycles
