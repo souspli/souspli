@@ -21,6 +21,7 @@ pnpm dev            # launch Souspli with hot reload
 | `pnpm test:cage` | Build, then the full Playwright run: escape battery + client specs. |
 | `pnpm world …` | The [30-account world](world.md). |
 | `pnpm gen:vectors` | Regenerate [conformance vectors](../protocol/conformance.md). |
+| `pnpm gen:welcome` | Regenerate the bundled welcome letter. Frozen: needs `FORCE=1`, and changes its hash. |
 | `pnpm dist` | Installers for the current platform → `release/`. |
 
 ## Toolchain notes
@@ -93,6 +94,7 @@ electron-builder reads them from the environment.
 | `SHELL_SCALE` | Force the device scale factor (Linux defaults to 2). |
 | `SHELL_FORCE_SOFTWARE_KEYS=1` | Ignore the OS keychain. |
 | `SHELL_TORRENT_OFFLINE=1` | No DHT, trackers or local discovery. |
+| `SHELL_NO_WELCOME=1` | Do not offer the first-run welcome letter (tests and scripted launches). |
 | `SHELL_ENS_RPC` | Ethereum RPC endpoint for ENS (requires `viem`, which is not a dependency). |
 
 The `SHELL_` prefix is the code's name for the client; see the

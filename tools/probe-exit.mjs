@@ -86,7 +86,7 @@ for (let i = 0; i < N; i++) {
   const dir = process.env.FIXED_DIR ?? mkdtempSync(join(tmpdir(), 'probe-'))
   const app = await _electron.launch({
     args: [TARGET],
-    env: { ...process.env, SHELL_FORCE_SOFTWARE_KEYS: '1', SHELL_USER_DATA_DIR: dir, SHELL_NO_RELAUNCH: '1' }
+    env: { ...process.env, SHELL_FORCE_SOFTWARE_KEYS: '1', SHELL_USER_DATA_DIR: dir, SHELL_NO_RELAUNCH: '1', SHELL_NO_WELCOME: '1' }
   })
   const proc = app.process()
   const exited = new Promise((res) => proc.on('exit', (code, signal) => res({ code, signal })))

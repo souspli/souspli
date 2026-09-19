@@ -35,6 +35,7 @@ async function launch(who: WorldAccount): Promise<Instance> {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '',
       SHELL_USER_DATA_DIR: accountDir(who.slug),
+      SHELL_NO_WELCOME: '1', // scripted: counts start from what this put there
       SHELL_ALLOW_MULTI: '1',
       SHELL_FORCE_SOFTWARE_KEYS: '1',
       SHELL_NO_RELAUNCH: '1'

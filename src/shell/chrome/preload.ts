@@ -206,6 +206,13 @@ const shell = {
   replies: (targetHash: string): Promise<{ count: number; rows: Record<string, unknown>[] }> =>
     ipcRenderer.invoke('shell:replies', targetHash),
   deleteDraft: (id: string): Promise<{ deleted: boolean }> => ipcRenderer.invoke('shell:delete-draft', id),
+  /** Main opened a thing on its own initiative (a double-clicked file, the
+   *  first-run welcome); the chrome follows so its header matches the mount. */
+  onOpenedThing: (cb: (p: { envelopeHash: string }) => void): void => {
+    ipcRenderer.on('shell:opened-thing', (_e, p: { envelopeHash: string }) => cb(p))
+  },
+  /** The same, for an open that happened before the chrome was listening. */
+  pendingOpen: (): Promise<string | null> => ipcRenderer.invoke('shell:pending-open'),
   /** Main pushes the outcome of a .thing opened from the desktop. */
   onFileOpened: (cb: (r: Record<string, unknown>) => void): void => {
     ipcRenderer.on('shell:file-opened', (_e, r) => cb(r))

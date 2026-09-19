@@ -19,7 +19,8 @@ page rather than hidden.
 ## The five-minute tour
 
 1. **Install and open it.** On first run Souspli creates an identity — a key that
-   lives on your machine. There is no sign-up because there is nobody to sign up with.
+   lives on your machine — and opens a welcome letter. There is no sign-up because
+   there is nobody to sign up with.
 2. **Press New → Memo.** Fill it in under *Edit*, flip to *View* to see exactly what
    will be signed, press **Publish**, and confirm. You now hold a signed letter.
 3. **Press Share… → Save as file…** and send the `.thing` file to a friend by any

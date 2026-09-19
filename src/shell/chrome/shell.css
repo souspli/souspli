@@ -210,6 +210,9 @@ body {
 .sh-cage-area {
   flex: 1;
   background: var(--evm-bg);
+  /* Only matters while the welcome pane is showing in a short window. */
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .sh-draft {
@@ -578,4 +581,34 @@ body {
 }
 .sh-replyto--known:hover {
   color: var(--evm-accent);
+}
+
+/* The content area while nothing is open. Centred and narrow: it is a page of
+   prose, not a dashboard. Never visible under a letter -- the native cage view
+   covers this whole area while one is mounted. */
+.sh-welcome {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 48px var(--evm-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--evm-space-4);
+}
+.sh-welcome-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.sh-welcome-lede {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--evm-text-2);
+}
+.sh-welcome-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--evm-space-2);
+  margin: var(--evm-space-2) 0;
 }

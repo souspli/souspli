@@ -613,6 +613,17 @@ export class Library {
     this.backfillRefs()
   }
 
+  /** A one-way marker for something that must happen at most once per library
+   *  (the first-run welcome). Kept beside the data it describes, so copying or
+   *  restoring a profile carries the answer with it. */
+  hasFlag(k: string): boolean {
+    return this.metaGet(`flag:${k}`) !== null
+  }
+
+  setFlag(k: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)').run(`flag:${k}`, '1')
+  }
+
   private metaGet(k: string): string | null {
     const r = this.db.prepare('SELECT v FROM meta WHERE k = ?').get(k) as { v: string } | undefined
     return r ? r.v : null

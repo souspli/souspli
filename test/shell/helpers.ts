@@ -468,6 +468,10 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
   // SHELL_TORRENT_OFFLINE='0' through extraEnv; the live path is covered by
   // `pnpm world magnet`, which moves real bytes between two real instances.
   env.SHELL_TORRENT_OFFLINE = '1'
+  // Specs start from an EMPTY library and count from there. The first-run
+  // welcome letter would make every one of them start at one, so it is off
+  // unless a spec asks for it (welcome.spec.ts sets SHELL_NO_WELCOME='0').
+  env.SHELL_NO_WELCOME = '1'
   // Identity changes normally restart the app; under Playwright that would
   // orphan the process, so specs relaunch explicitly instead.
   env.SHELL_NO_RELAUNCH = '1'

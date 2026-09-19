@@ -45,6 +45,9 @@ export type CageEvent =
   | { type: 'relay-mismatch'; advertised: string; got: string }
   | { type: 'relay-refused'; relay: string; hash: string; reason: string }
   | { type: 'offer-refused'; hash: string; reason: string }
+  // The bundled first-run letter failed the same gate everything else meets.
+  // It should be impossible, which is the reason to hear about it.
+  | { type: 'welcome-rejected'; reason: string }
 
 /** TEST-ONLY payload capture. A separate buffer that DOES retain emit payloads
  *  so the Playwright suite can assert on them. Populated only when

@@ -18,6 +18,7 @@ import {
   type ThingRow
 } from './library/index.js'
 import { STARTERS, starterByKey, starterBytes } from './starters/index.js'
+import { WELCOME_FLAG, welcomeBundle } from './welcome/index.js'
 import { mountThing, type MountedThing } from './mount/index.js'
 import { TransportService, FileTransport, HttpTransport, SeedTransport } from './transport/index.js'
 import { TorrentService, displayNameOf, infoHashOf } from './torrent/index.js'
@@ -912,6 +913,12 @@ app.whenReady().then(async () => {
         openLog('cage:error', { role, wcId, msg: message.slice(0, 220), line, src: String(sourceId).slice(-40) })
       }
     })
+  }
+
+  let pendingOpen: string | null = null
+  function announceOpened(envelopeHash: string): void {
+    pendingOpen = envelopeHash
+    chrome.webContents.send('shell:opened-thing', { envelopeHash })
   }
 
   async function openThing(envelopeHash: string): Promise<Record<string, unknown>> {
@@ -2925,6 +2932,16 @@ app.whenReady().then(async () => {
   ipcMain.handle('shell:ingest', (_e, base64: string) => ingestBytes(base64ToBytes(base64)))
   ipcMain.handle('shell:fetch', (_e, locator: string) => fetchNameOrLocator(locator))
   ipcMain.handle('shell:open', (_e, envelopeHash: string) => openThing(envelopeHash))
+  // Main sometimes opens a thing itself -- a .thing double-clicked in the file
+  // manager, the first-run welcome -- and the chrome has to follow, or its
+  // header goes on saying "Select a letter" over a mounted one. The event alone
+  // is not enough: at boot it can fire before the chrome has a listener. So the
+  // hash is also held here until the chrome collects it.
+  ipcMain.handle('shell:pending-open', () => {
+    const hash = pendingOpen
+    pendingOpen = null
+    return hash
+  })
   ipcMain.handle('shell:set-mode', (_e, mode: unknown) => setMode(mode === 'edit' ? 'edit' : 'view'))
 
   // ── Account & Keys ─────────────────────────────────────────────────────────
@@ -3254,15 +3271,39 @@ app.whenReady().then(async () => {
         // Land on it when it admitted; a rejected bundle just reports why.
         if (outcome.status === 'valid' && typeof outcome.envelopeHash === 'string') {
           await openThing(outcome.envelopeHash)
-          chrome.webContents.send('shell:opened-thing', { envelopeHash: outcome.envelopeHash })
+          announceOpened(outcome.envelopeHash)
         }
       }
     } finally {
       draining = false
     }
   }
+  // Read BEFORE the drain below starts admitting things: both answers are about
+  // how this launch began, and the drain is what changes them.
+  const emptyAtBoot = library.count() === 0
+  const launchedWithFile = pendingOpenFiles.length > 0
   drainOpenFiles = () => void openFilesNow()
   drainOpenFiles() // anything the OS handed us before we were ready
+
+  // First run: open onto a letter rather than an empty window. Offered exactly
+  // once per library, and only to an empty one -- an existing library has
+  // something better to show, and someone who deleted the welcome meant it.
+  // It goes through ingestBytes like anything else; bundled is not trusted.
+  // Launched WITH a file, the welcome still joins the feed but does not take
+  // the screen: the file is what they came for.
+  void (async () => {
+    if (process.env.SHELL_NO_WELCOME === '1' || library.hasFlag(WELCOME_FLAG)) return
+    library.setFlag(WELCOME_FLAG)
+    if (!emptyAtBoot) return
+    const outcome = await ingestBytes(welcomeBundle())
+    if (outcome.status !== 'valid' || typeof outcome.envelopeHash !== 'string') {
+      record({ type: 'welcome-rejected', reason: String(outcome.reason ?? outcome.status) })
+      return
+    }
+    if (launchedWithFile) return
+    await openThing(outcome.envelopeHash)
+    announceOpened(outcome.envelopeHash)
+  })()
 
   // Resume whatever this shell was serving when it last ran. Deliberately
   // AFTER ready and not awaited: loading webtorrent takes a moment, a peer
