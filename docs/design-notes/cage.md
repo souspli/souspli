@@ -1,3 +1,8 @@
+> **Design note — 2026-07-16.** A decision record, written when this was built and kept as
+> written. It uses the code's names (*thing*, *shell*, *cage* — see the
+> [glossary](../glossary.md)) and may describe things that have since changed.
+> Current documentation: [container](../how/architecture/container.md).
+
 # Build brief — the cage
 
 This document is a build brief for **phase 1** of a larger project. It is deliberately scoped to one deliverable: a hardened Electron renderer (the "cage") that runs arbitrary untrusted HTML/CSS/JS with **no network access and no ambient authority**, plus a **test suite of escape attempts** that proves the cage holds.

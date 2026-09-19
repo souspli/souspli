@@ -1,3 +1,8 @@
+> **Design note — 2026-07-25.** A decision record, written when this was built and kept as
+> written. It uses the code's names (*thing*, *shell*, *cage* — see the
+> [glossary](../glossary.md)) and may describe things that have since changed.
+> Current documentation: [building](../how/develop/building.md).
+
 # Build brief — packaging: installers for testers (phase 8)
 
 ## Why

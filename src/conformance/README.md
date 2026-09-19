@@ -1,7 +1,7 @@
 # @souspli/conformance
 
 The interop suite. It is what lets a **second implementation prove it agrees**
-with this one — byte for byte, outcome for outcome — so that a thing signed,
+with this one — byte for byte, outcome for outcome — so that a letter (a *thing*, on the wire) signed,
 sealed, or rejected by one implementation is signed, sealed, or rejected
 identically by the next. Format spec §11 requires it before publish.
 
@@ -13,9 +13,11 @@ Conformance has two halves:
   **This package is that half.**
 - **The cage half — a live harness.** Whether an untrusted thing can break out
   of the renderer sandbox is not expressible as data; it needs a running
-  browser. That half is the Playwright escape battery (`test/shell/*.spec.ts`),
-  indexed at the end of this file. A second *cage* implementation runs that
-  harness; a second *format* implementation runs these vectors.
+  browser. That half is the Playwright escape battery (`test/cage.spec.ts`
+  driving the hostile pages in `test/things/`) plus the client-obligation specs
+  (`test/shell/*.spec.ts`), indexed at the end of this file. A second *cage*
+  implementation runs that harness; a second *format* implementation runs these
+  vectors.
 
 ## Running the vectors
 
@@ -31,7 +33,7 @@ console.log(failed.length ? failed : 'all vectors pass')
 ```
 
 `formatTarget` is this repo's implementation wired up as the reference. A second
-implementation supplies its own target with the same six methods
+implementation supplies its own target with the same seven methods
 (`sha256`, `decodeCanonical`, `decodeManifest`, `verifyEnvelope`, `parseTar`,
 `admit`, `chainInfo`) and runs the identical vectors. In another language, read
 `vectors/*.json` directly — the shapes below are the whole contract.
@@ -117,8 +119,9 @@ which must fire **before** any trial-decryption.
 
 ## The cage half — the escape battery (indexed)
 
-A second *cage* implementation must survive this Playwright battery
-(`test/shell/*.spec.ts`), run with `pnpm test:cage`. It is not portable data — it
+A second *cage* implementation must survive the escape battery
+(`test/cage.spec.ts` + `test/things/`) and meet the client obligations below
+(`test/shell/*.spec.ts`); `pnpm test:cage` runs both. It is not portable data — it
 requires a live Electron renderer — so it is indexed here rather than encoded as
 JSON:
 

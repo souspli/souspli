@@ -1,3 +1,8 @@
+> **Design note — 2026-09-13.** A decision record, written when this was built and kept as
+> written. It uses the code's names (*thing*, *shell*, *cage* — see the
+> [glossary](../glossary.md)) and may describe things that have since changed.
+> Current documentation: [relay event](../how/protocol/relay-event.md).
+
 # Build brief — relays (nostr)
 
 Every transport built so far is a **pull**: you fetch a locator, or somebody

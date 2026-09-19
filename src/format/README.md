@@ -1,14 +1,13 @@
-# src/format — the thing format (reference implementation)
+# src/format — the letter format (reference implementation)
 
-The implementation of the format spec (`gearcat0/format`,
-`FORMAT_SPEC_DRAFT.md`). It lives inside this repo for now so the whole system
-builds and tests together; it is written to be extracted into its own package
-(`@souspli/format`) later with a `git mv` — nothing here imports from the
-shell or the cage.
+The implementation of [the format specification](../../docs/how/protocol/spec.md).
+On the wire, and throughout this code, a Souspli *letter* is called a **thing** and a
+*type* a **program** ([glossary](../../docs/glossary.md)).
 
-The **spec** is the separate `gearcat0/format` repo (spec only, no code). When
-the implementation surfaces a discrepancy in the spec, it is fixed by a PR
-against that repo's `FORMAT_SPEC_DRAFT.md`.
+It lives inside this repo so the whole system builds and tests together; it is
+written to be extracted into its own package (`@souspli/format`) with a `git mv` —
+nothing here imports from the shell or the cage. When the implementation surfaces a
+discrepancy in the spec, fix the spec in the same pull request.
 
 ## Modules
 
@@ -27,13 +26,14 @@ about this). Tests: `test/format/`.
 
 ## Known deviations from the spec (to reconcile)
 
+Also tracked in the spec's own *Pending amendments* section.
+
 - **Outer `ct` padding.** §7 says "reuse NIP-44's padding scheme"; `sealed.ts`
   pads the inner envelope to a 256-byte bucket instead of NIP-44's
   `calc_padded_len`. Sealed bundle *members* (§7.1) are unpadded (`nonce||ct`),
   matching §7.1 as written. Reconcile the envelope padding before interop.
 - **`ssh-ed25519`** verification is unimplemented (the scheme is a documented
   registry slot → `unverifiable`).
-- **§11 conformance vectors** are not built yet.
 
 Sealed content decryption (§7.1) is now implemented: `admitBundle` recovers the
 content key CK, decrypts `manifest.enc` / `program.enc` / ciphertext blobs, and

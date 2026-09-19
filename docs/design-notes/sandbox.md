@@ -1,3 +1,8 @@
+> **Design note — 2026-08-23.** A decision record, written when this was built and kept as
+> written. It uses the code's names (*thing*, *shell*, *cage* — see the
+> [glossary](../glossary.md)) and may describe things that have since changed.
+> Current documentation: [security](../how/architecture/security.md).
+
 # The OS sandbox (Layer 1) — status, honesty, and how to actually exercise it
 
 This note is about **Layer 1 only**: the OS-level Chromium process sandbox
