@@ -39,7 +39,7 @@ no registry to consult and none that can lose it.
 A letter cannot be edited; change one byte and it is a different letter with
 different signatures. What you can do is **supersede** it.
 
-- On your own letter, **New version…** publishes a successor chained to it. Your
+- On your own letter, **⋯ → New version…** publishes a successor chained to it. Your
   feed shows the current version; the header says *version 2 of 4* and **History**
   lists every one, oldest first. Earlier versions are not deleted or corrected —
   they are simply superseded, and anyone holding version 1 can still prove what it
@@ -56,7 +56,7 @@ Groups use exactly this: a roster is amended by publishing its next version.
 
 ## Attestations
 
-**Attest** on any open letter starts a signed statement *about* it: "Accurately
+**Attest** (under **⋯** on any open letter) starts a signed statement *about* it: "Accurately
 reproduced from the original source", "I witnessed this", "I agree to this", or your
 own words.
 

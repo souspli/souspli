@@ -13,7 +13,7 @@ The header above the letter has a **View | Edit** toggle:
 
 - **Edit** shows the type's own editing form.
 - **View** shows the letter exactly as a reader will see it, under a
-  *PREVIEW — unpublished draft* badge.
+  *PREVIEW — unsigned* badge.
 
 That toggle, and every other control, belongs to Souspli rather than to the letter.
 A letter's program can draw anything it likes inside its own rectangle; it cannot
@@ -81,14 +81,23 @@ big letters. The header is where you check.
 With a letter open, the header offers:
 
 - **Comment** — start a reply. It is a new letter of yours that points at this one.
-- **Attest** — sign a statement about it ("accurately reproduced", "I witnessed
-  this", or your own words). [More](contracts.md).
 - **Co-sign…** — add your signature to a document that expects several.
 - **▲ ▼** — vote for or against it. [Why votes are not likes](forums.md).
-- **Copy** — start a new draft of your own from its content.
+- **Share…** — [get it to someone](sharing.md).
+
+and, behind **⋯**, the things you do less often:
+
+- **Attest** — sign a statement about it ("accurately reproduced", "I witnessed
+  this", or your own words). [More](contracts.md).
 - **New version…** / **Your version…** — amend your own letter, or start your own
   line rooted on someone else's.
-- **Share…** — [get it to someone](sharing.md).
+- **Copy** — start a new draft of your own from its content.
+- **Delete** — remove it from your library. Copies already shared are unaffected.
+- the letter's **full hash**, with a Copy button.
+
+Counts of comments and attestations appear in the header once there is one to show.
+In a narrow window a few more controls step into **⋯** until the row fits, and come
+back when it does; nothing is ever removed.
 
 Each of these produces a *new signed letter of yours*. Nothing ever modifies the one
 you are looking at.

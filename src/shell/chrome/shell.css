@@ -526,7 +526,17 @@ body {
   --sh-feed-type-col: 5.5rem;
 }
 
-/* New chooser. */
+/* New chooser. A quarter wider than a standard dialog (484px): the longer
+   descriptions did not fit, and a button's text does not wrap, so the list grew
+   a horizontal scrollbar. The descriptions may also wrap now -- the list offers
+   every type in your library too, and a stranger's type can describe itself at
+   any length. */
+.sh-new-modal {
+  max-width: 605px;
+}
+.sh-new-type .sh-hint {
+  white-space: normal;
+}
 .sh-new-type {
   display: grid;
   grid-template-columns: var(--sh-feed-type-col) 1fr;
@@ -626,3 +636,42 @@ body {
   gap: var(--evm-space-2);
   margin: var(--evm-space-2) 0;
 }
+
+/* `hidden` has to mean hidden in this row. The design system gives buttons and
+   badges an explicit `display`, which silently beats the attribute -- a badge
+   marked hidden went on taking its ninety pixels. */
+.sh-thing-header [hidden] {
+  display: none !important;
+}
+
+/* Nothing in the row wraps or squeezes. It used to let text shrink to put off
+   overflowing, which broke names and hashes across two lines inside a 44px
+   strip -- and hid the tightness from the overflow steps, which measure
+   scrollWidth. Now a row that does not fit SAYS so, and the steps act on it. */
+.sh-thing-header > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.sh-thing-header > .sh-spacer {
+  flex-shrink: 1;
+}
+
+/* The last overflow step (see renderHeader): the tribe count folds into the
+   score's tooltip. */
+.sh-thing-header--tight .sh-vote-tribe {
+  display: none;
+}
+
+/* "⋯" and its dialog. Each row is the real button plus a line saying what it
+   does -- the header never had room for that. */
+.sh-more { display: inline-flex; flex-shrink: 0; }
+.sh-more-modal { width: 30em; max-width: 92vw; }
+.sh-more-row {
+  display: grid;
+  grid-template-columns: 9.5em 1fr;
+  align-items: center;
+  gap: var(--evm-space-3);
+  padding: var(--evm-space-2) 0;
+}
+.sh-more-row > button { justify-self: start; white-space: nowrap; }
+.sh-more-modal .evm-copyfield { margin-top: var(--evm-space-3); }

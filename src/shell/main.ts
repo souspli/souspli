@@ -514,7 +514,9 @@ app.whenReady().then(async () => {
   dbg('window')
 
   // ── Window + chrome ────────────────────────────────────────────────────────
-  const win = new BaseWindow({ width: 1200, height: 820, backgroundColor: '#08080a', title: 'Souspli' })
+  // 1280: the narrowest common laptop is 1366 wide, and at 1200 the per-letter
+  // header -- 900px once the feed has its 300 -- overflowed for most letters.
+  const win = new BaseWindow({ width: 1280, height: 820, backgroundColor: '#08080a', title: 'Souspli' })
   const chrome = new WebContentsView({
     webPreferences: { preload: CHROME_PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false }
   })
