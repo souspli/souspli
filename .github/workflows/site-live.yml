@@ -1,0 +1,28 @@
+name: site-live
+
+# What visitors RECEIVE, as opposed to what we built. The build gate in test.yml
+# cannot see edge-side rewrites (an injected analytics beacon, a loader, email
+# obfuscation); this fetches souspli.org the way a browser does and fails if the
+# served HTML carries a script, a cookie, or a weakened CSP.
+
+on:
+  schedule:
+    - cron: '17 6 * * *' # daily; a dashboard toggle can change this with no commit
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths: ['site/**', 'docs/**']
+
+jobs:
+  live:
+    name: deployed site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # A push triggers the Pages build too; give it time to go live first.
+      - if: github.event_name == 'push'
+        run: sleep 240
+      - run: node site/scripts/check-live.mjs
