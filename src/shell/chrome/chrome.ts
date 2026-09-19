@@ -19,6 +19,8 @@ interface ShellApi {
     attachments?: { name: string; base64: string; mime?: string }[]
   }): Promise<{ outcome: Outcome; path: string | null }>
   open(envelopeHash: string): Promise<HeaderFacts>
+  onOpenedThing(cb: (p: { envelopeHash: string }) => void): void
+  pendingOpen(): Promise<string | null>
   close(): Promise<void>
   setMode(mode: 'view' | 'edit'): Promise<'view' | 'edit'>
   onModeChanged(cb: (p: { mode: 'view' | 'edit'; preview: boolean; publishable: boolean }) => void): void
@@ -252,7 +254,7 @@ app.append(topbar, feedPane, main)
 // ── Omnibar ──────────────────────────────────────────────────────────────────
 const identityEl = el('span', 'evm-address evm-address--muted', 'loading…')
 const ingestInput = el('input', 'evm-input evm-input--mono') as HTMLInputElement
-ingestInput.placeholder = 'paste a base64 bundle, or https:/magnet:/bundle:/file:/a name'
+ingestInput.placeholder = 'Paste a letter someone sent you — or a magnet:, bundle: or https: link'
 ingestInput.setAttribute('aria-label', 'paste bundle or locator')
 const ingestBtn = el('button', 'evm-btn evm-btn--primary evm-btn--sm', 'Ingest') as HTMLButtonElement
 const fileBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Open file…') as HTMLButtonElement
@@ -2662,12 +2664,51 @@ function voteControl(envelopeHash: string, facts: NonNullable<HeaderFacts['votes
 }
 
 // ── Per-thing trust header ───────────────────────────────────────────────────
+/** What fills the content area while no letter is open. It used to be nothing:
+ *  a new install was a black rectangle under "Select a letter from the feed."
+ *  The native cage view is only attached while something is mounted, so this
+ *  space is the chrome's to draw in -- and it says what the app is and offers
+ *  the two ways in. It is cleared the moment a letter takes the area. */
+function renderWelcomePane(show: boolean): void {
+  cageArea.replaceChildren()
+  if (!show) return
+  const pane = el('div', 'sh-welcome')
+  pane.setAttribute('data-testid', 'welcome-pane')
+  pane.append(
+    el('h2', 'sh-welcome-title', 'Letters, not servers.'),
+    el(
+      'p',
+      'sh-welcome-lede',
+      'A letter is one signed file. Its words, pictures and layout travel together, nobody can change it once it is signed, and it opens in a sealed container that cannot phone home. Nothing here touches the network unless you ask it to.'
+    )
+  )
+  const actions = el('div', 'sh-welcome-actions')
+  const write = el('button', 'evm-btn evm-btn--primary', 'Write a letter') as HTMLButtonElement
+  write.setAttribute('data-testid', 'welcome-write')
+  write.addEventListener('click', () => void openNewMenu())
+  const open = el('button', 'evm-btn evm-btn--secondary', 'Open a letter file…') as HTMLButtonElement
+  open.setAttribute('data-testid', 'welcome-open')
+  open.addEventListener('click', () => fileInput.click())
+  actions.append(write, open)
+  pane.append(
+    actions,
+    el(
+      'p',
+      'sh-hint',
+      'You can also drag a .thing file onto this window, or paste a letter or a link into the box at the top. Whatever arrives is verified — signature, program and every attachment — before any of it is shown.'
+    ),
+    el('p', 'sh-hint', 'Guides and the full specification: souspli.org')
+  )
+  cageArea.append(pane)
+}
+
 function renderHeader(h: HeaderFacts | null): void {
   thingHeader.replaceChildren()
   // Which thing this row is describing. The header is rebuilt per open, so
   // anything filled in asynchronously must check this before touching it.
   if (h) thingHeader.setAttribute('data-envelope-hash', h.envelopeHash)
   else thingHeader.removeAttribute('data-envelope-hash')
+  renderWelcomePane(!h)
   if (!h) {
     modeButtons = null
     trustBadge = null
@@ -3216,6 +3257,10 @@ shell.onOpenPeople(() => openPeopleModal())
 shell.onOpenAccount(() => void openAccountModal()) // File → Account & Keys…
 // A .thing double-clicked in the file manager: say what became of it, using
 // the same wording as any other ingest (it went through the same gate).
+shell.onOpenedThing(({ envelopeHash }) => {
+  void shell.pendingOpen() // collected: the event got here first
+  void openThing(envelopeHash)
+})
 shell.onFileOpened((r) => {
   const name = String(r.path ?? '').split(/[\\/]/).pop()
   if (r.status === 'valid') showText(`Opened ${name} — admitted as ${String(r.type)}`, 'success')
@@ -3236,4 +3281,7 @@ shell.onFileOpened((r) => {
   renderSafety(id.keyStorage)
   renderHeader(null)
   await refreshFeed()
+  // Anything main opened before this listener existed.
+  const pending = await shell.pendingOpen()
+  if (pending) await openThing(pending)
 })()

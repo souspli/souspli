@@ -35,7 +35,7 @@ macOS, Windows and Linux):
 | **Hardware wallets, OS-backed signing** | Keys are held in software. |
 | **Other signature schemes for writing** | Letters are signed with an Ethereum-style key only. Nostr-key signatures verify on receipt; the SSH scheme in the specification is not implemented. |
 | **Signed installers, auto-update** | Your OS will warn on first launch, and you update by hand. |
-| **Somewhere to start** | The relay list is empty and no community is suggested. A new install is an empty room until someone hands you a letter or a relay address. |
+| **Somewhere to go** | A new install opens onto a welcome letter, but the relay list is empty and no community is suggested: there is nobody to talk to until someone hands you a letter or a relay address. |
 | **Opening enclosed PDFs and documents** | They travel intact and can be exported, but the container cannot display them. |
 | **Mobile, or a web viewer** | Desktop only. |
 

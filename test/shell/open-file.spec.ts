@@ -56,6 +56,7 @@ function launchWithFile(dir: string, thingPath: string): Promise<ElectronApplica
     env: {
       ...process.env,
       SHELL_USER_DATA_DIR: dir,
+      SHELL_NO_WELCOME: '1', // scripted: counts start from what this put there
       SHELL_FORCE_SOFTWARE_KEYS: '1',
       SHELL_NO_RELAUNCH: '1'
     } as Record<string, string>
@@ -98,6 +99,21 @@ test('a .thing passed at launch is admitted and opened', async () => {
           }),
         (open) => open === true
       )
+      // The mount is main's doing; the trust header is the chrome's. It has to
+      // FOLLOW, or a verified letter sits under "Select a letter from the
+      // feed." with no author shown -- which is how this used to behave.
+      await poll(
+        () =>
+          app.evaluate(async (e) => {
+            const wc = e.webContents.getAllWebContents().find((w) => !w.isDestroyed() && w.getURL().includes('shell/chrome'))
+            return wc
+              ? ((await wc.executeJavaScript(
+                  `document.querySelector('.sh-thing-header').getAttribute('data-envelope-hash')`
+                )) as string | null)
+              : null
+          }),
+        (h) => h === feed[0]!.envelopeHash
+      )
     } finally {
       await app.close().catch(() => {})
     }
@@ -138,6 +154,7 @@ test('a second launch hands the file to the running shell instead of starting a 
       env: {
         ...process.env,
         SHELL_USER_DATA_DIR: dir,
+        SHELL_NO_WELCOME: '1', // scripted: counts start from what this put there
         SHELL_FORCE_SOFTWARE_KEYS: '1',
         SHELL_NO_RELAUNCH: '1'
       } as Record<string, string>

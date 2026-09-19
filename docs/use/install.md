@@ -40,8 +40,18 @@ it. Read it; it is short and it is true:
   letter that you could not bear to leak. **A signed letter is public and permanent
   once shared.**
 
-Then you are looking at an empty library. [Write your first letter](first-letter.md),
-or open a `.thing` file somebody sent you.
+Then Souspli opens onto a **welcome letter** — a real one, bundled with the app and
+checked exactly like a letter from a stranger before it was shown. It is there so the
+first thing you see is what matters most: a letter below, and above it the header
+that tells you who signed it. It was signed by a key made for that one letter and
+then destroyed, so the address is a stranger's, and the header says so.
+
+It is offered once. Delete it and it will not come back; a library that already
+holds something never receives it. With nothing open, the window says what Souspli
+is and offers the two ways in: **Write a letter** and **Open a letter file…**.
+
+Next: [write your first letter](first-letter.md), or open a `.thing` file somebody
+sent you.
 
 ## Where your data lives
 
