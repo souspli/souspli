@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { mkdirSync } from 'node:fs'
 import { CasStore, EphemeralStore, type AttachmentStore } from '../../main/store.js'
 import { claimedTitle } from './title.js'
+import { SHELL_PINNED_KEYS, pinsOf, type Pins } from './pins.js'
 import {
   decodeManifest,
   toHex,
@@ -155,6 +156,14 @@ export interface DraftRow {
  *  -- see tribe() and the moderator roles a roster declares. */
 export const INDEXED_RELS = ['replyTo', 'attests', 'votesOn', 'inGroup'] as const
 export type IndexedRel = (typeof INDEXED_RELS)[number]
+
+// A relation the library indexes is one only the shell can seed, so it must be
+// one the shell keeps in a draft (pins.ts). Adding a rel here and forgetting it
+// there would bring back the bug pins exist for -- a pointer silently dropped by
+// the first keystroke -- so it is a refusal to start rather than a comment.
+for (const rel of INDEXED_RELS) {
+  if (!SHELL_PINNED_KEYS.includes(rel)) throw new Error(`INDEXED_RELS has '${rel}' but pins.ts does not pin it`)
+}
 
 /** Read a string field out of untrusted args (Map or plain object). */
 function argString(args: unknown, key: string): string {
@@ -552,6 +561,14 @@ export class Library {
         path     TEXT NOT NULL,
         seq      INTEGER NOT NULL,
         prev     TEXT NOT NULL
+      );
+
+      -- The pointers the SHELL seeded into a draft (replyTo, inGroup, ...),
+      -- kept apart from args_json because args are replaced whole by every
+      -- draft the program emits, and these must outlive that. See pins.ts.
+      CREATE TABLE IF NOT EXISTS draft_pins (
+        draft_id  TEXT PRIMARY KEY,
+        pins_json TEXT NOT NULL
       );
 
       -- Who a group LISTS. Keyed by envelope hash, so it records a particular
@@ -1837,7 +1854,25 @@ export class Library {
     this.db
       .prepare('INSERT INTO drafts (id, type, prog_hash, args_json, created, updated) VALUES (?,?,?,?,?,?)')
       .run(row.id, row.type, row.progHash, args === null ? null : JSON.stringify(args), now, now)
+    // Whatever pointers came in the seed are the shell's from here on.
+    const pins = pinsOf(args)
+    if (Object.keys(pins).length > 0) {
+      this.db.prepare('INSERT OR REPLACE INTO draft_pins (draft_id, pins_json) VALUES (?,?)').run(row.id, JSON.stringify(pins))
+    }
     return row
+  }
+
+  /** The pointers the shell seeded into this draft; empty when it seeded none. */
+  draftPins(id: string): Pins {
+    const r = this.db.prepare('SELECT pins_json FROM draft_pins WHERE draft_id = ?').get(id) as
+      | { pins_json: string }
+      | undefined
+    if (!r) return {}
+    try {
+      return pinsOf(JSON.parse(r.pins_json)) // re-filtered: never trust a stored shape
+    } catch {
+      return {}
+    }
   }
 
   listDrafts(): DraftRow[] {
@@ -1872,6 +1907,7 @@ export class Library {
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM draft_blobs WHERE draft_id = ?').run(id)
       this.db.prepare('DELETE FROM draft_chain WHERE draft_id = ?').run(id)
+      this.db.prepare('DELETE FROM draft_pins WHERE draft_id = ?').run(id)
       this.db.prepare('DELETE FROM drafts WHERE id = ?').run(id)
     })()
     this.gc(candidates)

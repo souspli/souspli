@@ -94,8 +94,11 @@ Souspli it is advice you can audit:
   their reach ends there.
 - A verdict names its forum, so moderating one group gives no power in another.
 
-> **Alpha gap:** verdicts are verified, honoured and displayed, but the app has no
-> button yet for a moderator to *issue* one. See [status](status.md).
+**If the roster you hold names you a moderator**, each unjudged post in the forum
+window carries **Hide…** and **Endorse…**. Pressing one does not issue a verdict: it
+starts a draft that already names the post, the forum and your ruling. Say why, press
+**Publish**, confirm — and then **Post to relays**, because a verdict is a letter
+like any other and reaches other readers the same way.
 
 ## Your main feed stays readable
 

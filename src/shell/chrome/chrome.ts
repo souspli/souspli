@@ -2389,7 +2389,7 @@ async function openForumModal(rootHash: string): Promise<void> {
     posts.setAttribute('data-testid', 'forum-posts')
     posts.setAttribute('data-count', String(listing.rows.length))
     if (listing.rows.length === 0) posts.append(el('div', 'evm-empty', 'Nothing posted here yet.'))
-    for (const row of listing.rows) posts.append(forumPostRow(row, rootHash, overlay))
+    for (const row of listing.rows) posts.append(forumPostRow(row, rootHash, overlay, facts.iAmModerator === true))
     body.append(posts)
 
     if (facts.pending && (facts.pending as unknown[]).length > 0) {
@@ -2457,7 +2457,12 @@ async function openForumModal(rootHash: string): Promise<void> {
 
 /** One ranked post. A hidden one is FOLDED, never dropped: the line says who
  *  hid it and why, and the post is still one press away. */
-function forumPostRow(row: Record<string, unknown>, rootHash: string, overlay: HTMLElement): HTMLElement {
+function forumPostRow(
+  row: Record<string, unknown>,
+  rootHash: string,
+  overlay: HTMLElement,
+  iAmModerator = false
+): HTMLElement {
   const wrap = el('div', 'sh-forum-row')
   wrap.setAttribute('data-envelope-hash', String(row.envelopeHash))
   const verdict = row.verdict as { verdict: string; byName: string; by: string; why: string } | null
@@ -2481,7 +2486,40 @@ function forumPostRow(row: Record<string, unknown>, rootHash: string, overlay: H
     return wrap
   }
   wrap.append(forumPostBody(row, rootHash, overlay, verdict))
+  // A moderator's two words. Only where they would count: the roster YOU hold
+  // names you, the post is actually here (an offer has nothing to judge yet),
+  // and nobody has ruled on it. Outside the row's own button -- buttons must
+  // not nest -- and deliberately small: moderating is rare, reading is not.
+  if (iAmModerator && !verdict && row.offered !== true) wrap.append(moderatorControls(String(row.envelopeHash), rootHash, overlay))
   return wrap
+}
+
+/** Hide / Endorse. Each starts an ordinary draft -- an attestation naming the
+ *  post, the forum and the verdict -- which opens for the moderator to say WHY
+ *  and is signed through the same Publish-and-confirm as anything else. No
+ *  verdict is ever issued by this click alone. */
+function moderatorControls(targetHash: string, rootHash: string, overlay: HTMLElement): HTMLElement {
+  const bar = el('div', 'sh-forum-mod')
+  bar.setAttribute('data-testid', 'forum-mod')
+  bar.append(el('span', 'sh-hint', 'You moderate this forum:'))
+  const tips: Record<string, string> = {
+    hide: 'Start a signed verdict that folds this post behind a line saying who hid it and why. It deletes nothing, readers can still open it, and it only counts for people whose copy of the roster names you a moderator.',
+    endorse: 'Start a signed verdict that marks this post as endorsed by you, for people whose copy of the roster names you a moderator.'
+  }
+  for (const verdict of ['hide', 'endorse'] as const) {
+    const btn = el('button', 'evm-btn evm-btn--ghost evm-btn--sm', verdict === 'hide' ? 'Hide…' : 'Endorse…')
+    btn.setAttribute('data-testid', `forum-mod-${verdict}`)
+    btn.title = tips[verdict]!
+    btn.addEventListener('click', async () => {
+      const r = await shell.newVerdict(targetHash, rootHash, verdict)
+      if (!r.id) return showText(`Could not start a verdict: ${String(r.error ?? 'unknown')}`, 'danger')
+      overlay.remove()
+      await openThing(r.id)
+      showText('Say why, then Publish. Post it to the forum’s relay for other readers to see it.', 'success')
+    })
+    bar.append(btn)
+  }
+  return bar
 }
 
 function forumPostBody(
