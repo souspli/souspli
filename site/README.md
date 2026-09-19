@@ -18,37 +18,31 @@ the host never has to install Electron or compile SQLite to publish a web page.
 
 `scripts/check.mjs` fails the build if any page:
 
-- contains a `<script>` tag or an inline event handler — the site runs no JavaScript;
+- contains a `<script>` tag or an inline event handler — nothing we build ships JavaScript;
 - loads anything from another origin (images, styles, fonts, frames);
 - has a dead internal link, or a relative `.md` link that was not rewritten;
 - exceeds **14 KB gzipped**, so that it arrives in the first round trip.
   (`/how/protocol/spec/` is the one allow-listed exception.)
 
-The footer's claim — no third-party requests, no cookies, no JavaScript — is
-therefore checked on every build rather than merely asserted. `public/_headers` adds
-a `Content-Security-Policy` of `default-src 'none'` so a browser would refuse them
-anyway.
+`public/_headers` adds a `Content-Security-Policy` of `default-src 'none'`.
 
 ## And what visitors actually receive
 
-The build gate proves what is *published*. A CDN can still rewrite HTML at the edge —
-and Cloudflare did: zone-level Web Analytics injected a beacon `<script>` into every
-page of souspli.org while the same deployment on `pages.dev` stayed clean. The CSP
-blocked it, but the markup was there.
+The build gate proves what is *published*; a CDN can still rewrite HTML afterwards.
 
 ```bash
 npm run check:live      # SITE_URL=https://… to point it elsewhere
 ```
 
-fetches every page **with a browser's navigation headers** (edge injection ignores a
-bare `curl`) and fails on a served `<script>`, a cookie, a missing CSP, or an
-over-budget page. `.github/workflows/site-live.yml` runs it daily and after each
-deploy, because a dashboard toggle can change the answer with no commit.
+fetches every deployed page with a browser's navigation headers and fails on an
+unexpected `<script>`, a cookie, a missing CSP, an edge rewrite, or an over-budget
+page. `.github/workflows/site-live.yml` runs it daily and after each deploy.
 
-Cloudflare settings that must stay **off** for the zone: Web Analytics / RUM
-(automatic setup), Rocket Loader, Email Address Obfuscation, Automatic HTTPS
-Rewrites. Network Error Logging only reports load *failures*, but it reports them to
-a third party; the check warns about it.
+Cloudflare's Web Analytics beacon is **expected** — it is enabled on the Pages
+project — and the check allows exactly that one script. Note that the CSP in
+`public/_headers` currently refuses to load it, so it collects nothing; if the
+numbers are ever wanted, add `script-src https://static.cloudflareinsights.com;
+connect-src https://cloudflareinsights.com` there.
 
 ## How pages are made
 

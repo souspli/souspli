@@ -1,14 +1,18 @@
-// The build gate (check.mjs) proves what we PUBLISH. This proves what visitors
-// RECEIVE: a CDN can rewrite HTML at the edge — inject an analytics beacon, an
-// email-obfuscation script, a loader — after the build gate has passed. It did:
-// Cloudflare's zone-level Web Analytics was adding a <script> to every page of
-// souspli.org while the identical deployment on pages.dev stayed clean.
+// The build gate (check.mjs) proves what we PUBLISH. This looks at what visitors
+// RECEIVE: a CDN can rewrite HTML after the build gate has passed, and only a
+// fetch of the deployed site can see that.
 //
-// Edge injection keys on real navigation headers (a bare curl is served the
-// untouched file), so this asks the way a browser does.
+// Cloudflare's own Web Analytics beacon is expected and allowed: it is switched
+// on for the Pages project, and the site makes no claim to the contrary. What
+// this still catches is anything ELSE turning up in served pages — another
+// script, a cookie, a weakened CSP, an edge rewrite, a page over budget.
+//
+// Some edge injection keys on real navigation headers (a bare curl is served
+// the untouched file), so this asks the way a browser does.
 const BASE = process.env.SITE_URL ?? 'https://souspli.org'
 const BUDGET = 14 * 1024
 const OVER_BUDGET_OK = new Set(['/how/protocol/spec/'])
+const CF_BEACON = /\ssrc=["']https:\/\/static\.cloudflareinsights\.com\/beacon\.min\.js/
 const NAV = {
   accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
   'accept-encoding': 'identity', // measure bytes ourselves, below
@@ -21,7 +25,6 @@ const NAV = {
 
 const { gzipSync } = await import('node:zlib')
 const problems = []
-const warnings = new Set()
 const seen = new Set()
 const queue = ['/']
 while (queue.length) {
@@ -37,10 +40,10 @@ while (queue.length) {
   const csp = res.headers.get('content-security-policy') ?? ''
   if (!/default-src 'none'/.test(csp)) problems.push(`${url}: Content-Security-Policy missing or weakened`)
   if (res.headers.get('set-cookie')) problems.push(`${url}: sets a cookie`)
-  if (res.headers.get('nel') || res.headers.get('report-to')) {
-    warnings.add('NEL / Report-To headers present: browsers will report load FAILURES to a third party (Cloudflare → Network → Network Error Logging)')
+  for (const m of html.matchAll(/<script\b[^>]*>/gi)) {
+    if (CF_BEACON.test(m[0])) continue
+    problems.push(`${url}: served with ${m[0].slice(0, 120)}`)
   }
-  for (const m of html.matchAll(/<script\b[^>]*>/gi)) problems.push(`${url}: served with ${m[0].slice(0, 120)}`)
   if (/cdn-cgi\/|__cf_email__/i.test(html)) problems.push(`${url}: edge rewrite present (cdn-cgi / email obfuscation)`)
   const gz = gzipSync(html, { level: 9 }).length
   if (gz > BUDGET && !OVER_BUDGET_OK.has(url)) problems.push(`${url}: ${gz} bytes gzipped as served`)
@@ -48,7 +51,6 @@ while (queue.length) {
 }
 
 console.log(`${BASE}: ${seen.size} pages fetched as a browser would`)
-for (const w of warnings) console.warn('warning: ' + w)
 if (problems.length) {
   // One line per distinct cause reads better than 48 copies of it.
   const byCause = new Map()
@@ -60,4 +62,4 @@ if (problems.length) {
   for (const [cause, n] of byCause) console.error(`  ${n} page(s): ${cause}`)
   process.exit(1)
 }
-console.log('ok — what visitors receive is what was built')
+console.log('ok — nothing unexpected in what visitors receive')

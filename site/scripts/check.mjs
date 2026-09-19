@@ -1,6 +1,6 @@
-// Build gate for souspli.org. The site's claims are testable, so they are
-// tested: no JavaScript, no third-party requests, no dead internal links, and
-// every page small enough to arrive in the first round trip.
+// Build gate for souspli.org: what we build ships no JavaScript, loads nothing
+// from another origin, has no dead internal links, and every page is small
+// enough to arrive in the first round trip.
 import fs from 'node:fs'
 import path from 'node:path'
 import zlib from 'node:zlib'
