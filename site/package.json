@@ -1,0 +1,15 @@
+{
+  "name": "souspli-site",
+  "private": true,
+  "description": "souspli.org — a static site built from ../docs. Standalone on purpose: Cloudflare Pages builds this directory without installing Electron.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "eleventy && node scripts/check.mjs",
+    "dev": "eleventy --serve",
+    "check": "node scripts/check.mjs"
+  },
+  "devDependencies": {
+    "@11ty/eleventy": "^3.1.6"
+  }
+}

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% if landing %}Souspli — signed letters, not servers{% elif title == 'Souspli' %}Documentation — Souspli{% else %}{{ title }} — Souspli{% endif %}</title>
+<meta name="description" content="{{ description or 'Signed, self-contained letters that people send each other and keep — instead of pages a server renders for them.' }}">
+<meta property="og:title" content="{% if landing %}Souspli{% else %}{{ title }} — Souspli{% endif %}">
+<meta property="og:description" content="{{ description or 'Signed, self-contained letters that people send each other and keep — instead of pages a server renders for them.' }}">
+<meta property="og:type" content="website">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23c67139'/%3E%3Cpath d='M6 10h20v13H6z' fill='%23f5ead8'/%3E%3Cpath d='M6 10l10 8 10-8' fill='none' stroke='%23201e1d' stroke-width='2'/%3E%3Ccircle cx='16' cy='19' r='3' fill='%238c491a'/%3E%3C/svg%3E">
+<style>
+:root{--bg:#f5ead8;--surface:#ebddc5;--text:#201e1d;--muted:#5d554c;--accent:#8c491a;--rule:#d9c8aa;--code:#e6d6ba}
+@media(prefers-color-scheme:dark){:root{--bg:#1b1917;--surface:#26221f;--text:#ece3d4;--muted:#a99f90;--accent:#f6a06b;--rule:#3a342e;--code:#2c2723}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:17px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:46rem;margin:0 auto;padding:0 1.25rem}
+header.top{border-bottom:1px solid var(--rule)}
+header.top .wrap{display:flex;flex-wrap:wrap;gap:.25rem 1.25rem;align-items:baseline;padding-block:.9rem;max-width:62rem}
+.mark{font:600 1.25rem ui-serif,Georgia,serif;color:var(--text);text-decoration:none;margin-right:auto}
+nav a{color:var(--muted);text-decoration:none;margin-left:1rem;font-size:.95rem}
+nav a:first-child{margin-left:0}
+nav a:hover,nav a[aria-current]{color:var(--accent)}
+main{padding-block:2rem 3rem}
+.crumb{font-size:.85rem;color:var(--muted);margin:0 0 1.5rem}
+.crumb a{color:inherit}
+h1,h2,h3{font-family:ui-serif,Georgia,"Times New Roman",serif;line-height:1.2;font-weight:600}
+h1{font-size:2.2rem;margin:0 0 1.2rem}
+h2{font-size:1.45rem;margin:2.4rem 0 .8rem;padding-top:.4rem;border-top:1px solid var(--rule)}
+h3{font-size:1.15rem;margin:1.8rem 0 .5rem}
+a{color:var(--accent);text-underline-offset:.15em}
+p,ul,ol,blockquote,pre,.scroll{margin:0 0 1.1rem}
+li{margin:.25rem 0}
+blockquote{border-left:3px solid var(--accent);padding:.1rem 0 .1rem 1rem;color:var(--muted)}
+blockquote p:last-child{margin:0}
+code{font:.88em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:var(--code);padding:.1em .3em;border-radius:4px}
+pre{background:var(--code);padding:.9rem 1rem;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0;font-size:.82rem}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:.94rem}
+th,td{text-align:left;vertical-align:top;padding:.5rem .7rem;border-bottom:1px solid var(--rule)}
+th{font-weight:600}thead th{border-bottom-width:2px}
+hr{border:0;border-top:1px solid var(--rule);margin:2rem 0}
+footer{border-top:1px solid var(--rule);color:var(--muted);font-size:.85rem;padding-block:1.5rem 2.5rem}
+footer a{color:inherit}
+.hero{padding-block:1.5rem .5rem}
+.hero h1{font-size:clamp(2.2rem,6vw,3.4rem);margin-bottom:1rem}
+.hero .lede{font-size:1.25rem;color:var(--muted);max-width:38rem}
+.kicker{font-size:.8rem;letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin:0 0 .6rem}
+.btns{display:flex;flex-wrap:wrap;gap:.6rem;margin:1.6rem 0 .6rem}
+.btn{display:inline-block;padding:.6rem 1.1rem;border-radius:999px;text-decoration:none;font-weight:600;border:1.5px solid var(--accent);color:var(--accent)}
+.btn.primary{background:var(--accent);color:var(--bg)}
+.note{font-size:.88rem;color:var(--muted)}
+.doors{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.8rem;margin:0 0 1.1rem;padding:0;list-style:none}
+.doors li{margin:0;background:var(--surface);border-radius:12px;padding:1rem 1.1rem}
+.doors a{font:600 1.15rem ui-serif,Georgia,serif;text-decoration:none}
+.doors p{margin:.3rem 0 0;font-size:.92rem;color:var(--muted)}
+.wide{max-width:62rem}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+<a class="mark" href="/">Souspli</a>
+<nav aria-label="Main">
+<a href="/why/"{% if section == 'why' %} aria-current="true"{% endif %}>Why</a>
+<a href="/use/"{% if section == 'use' %} aria-current="true"{% endif %}>Use</a>
+<a href="/how/"{% if section == 'how' %} aria-current="true"{% endif %}>How</a>
+<a href="/next/roadmap/"{% if section == 'next' %} aria-current="true"{% endif %}>Next</a>
+<a href="{{ repoUrl }}">GitHub</a>
+</nav>
+</div></header>
+<main><div class="wrap{% if landing %} wide{% endif %}">
+{% if not landing %}<p class="crumb"><a href="/">Souspli</a> / <a href="/docs/">Docs</a>{% if section %} / <a href="/{{ section }}/{% if section == 'next' %}roadmap/{% endif %}">{{ section | replace('design-notes', 'design notes') | capitalize }}</a>{% endif %}</p>{% endif %}
+{{ content | safe }}
+</div></main>
+<footer><div class="wrap{% if landing %} wide{% endif %}">
+<p>This site makes no third-party requests, sets no cookies and runs no JavaScript.{% if sourcePath and not landing %} · <a href="{{ repoUrl }}/blob/master/{{ sourcePath }}">Edit this page</a>{% endif %}</p>
+<p><em>sous pli</em> — under sealed cover · <a href="{{ repoUrl }}">Source</a> · <a href="/use/status/">Alpha status</a> · <a href="{{ repoUrl }}/blob/master/SECURITY.md">Security</a> · Apache-2.0</p>
+</div></footer>
+</body>
+</html>

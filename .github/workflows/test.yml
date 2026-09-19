@@ -15,6 +15,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The docs ARE the website, so a dead link or an oversized page is a build
+  # failure here rather than a surprise on souspli.org. Standalone package:
+  # nothing from the app is installed.
+  site:
+    name: docs + site
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
   unit:
     name: unit + typecheck
     runs-on: ubuntu-latest
