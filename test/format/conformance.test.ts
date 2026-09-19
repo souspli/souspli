@@ -8,7 +8,7 @@ import { formatTarget, loadVectors, runAll, type Result } from '../../src/confor
 
 const results: Result[] = runAll(formatTarget, loadVectors())
 
-describe('conformance vectors — @yourproject/format', () => {
+describe('conformance vectors — @souspli/format', () => {
   it('the suite is non-empty across every category', () => {
     const categories = new Set(results.map((r) => r.category))
     expect(categories).toEqual(new Set(['canonical', 'hashing', 'envelopes', 'bundles', 'chain', 'sealed', 'limits']))

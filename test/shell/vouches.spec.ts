@@ -292,7 +292,7 @@ test('the header shows where an author sits, and never as a score', async () => 
   // Not a score, and not verification: it says how you know OF them, and
   // explicitly disclaims the rest.
   expect(badge.text).not.toContain('✓')
-  expect(badge.title).toMatch(/nothing about this thing/i)
+  expect(badge.title).toMatch(/nothing about this letter/i)
 })
 
 test('a thing by a stranger gets no badge at all', async () => {

@@ -96,14 +96,14 @@ export const STARTERS: readonly Starter[] = [
     key: 'starter:comment',
     type: 'comment',
     label: 'Comment',
-    description: 'Say something about another thing.',
+    description: 'Say something about another letter.',
     html: commentHtml
   },
   {
     key: 'starter:attestation',
     type: 'attestation',
     label: 'Attestation',
-    description: 'Put your signature behind a statement about another thing.',
+    description: 'Put your signature behind a statement about another letter.',
     html: attestationHtml
   },
   {
@@ -117,7 +117,7 @@ export const STARTERS: readonly Starter[] = [
     key: 'starter:vote',
     type: 'vote',
     label: 'Vote',
-    description: 'One key, for or against one thing. Usually cast with ▲ ▼ rather than made here.',
+    description: 'One key, for or against one letter. Usually cast with ▲ ▼ rather than made here.',
     html: voteHtml
   },
   {

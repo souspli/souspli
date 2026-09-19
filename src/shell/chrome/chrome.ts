@@ -303,7 +303,7 @@ function fetchDisclosure(input: string): { short: string; full: string } | null 
     full:
       `Fetching this tells ${host} your IP address. ` +
       'And a URL is not content-addressed: it names a place, so you get whatever is served there. ' +
-      'Admission proves what arrives is a validly signed thing — not that it is the thing you asked for.'
+      'Admission proves what arrives is a validly signed letter — not that it is the letter you asked for.'
   }
 }
 
@@ -506,8 +506,8 @@ async function deleteWithConfirm(id: string, type: string, isDraft = false): Pro
         'Discard'
       )
     : await confirmDanger(
-        'Delete thing',
-        `Delete this ${type} from your library? Its bundle stops being seeded from this machine. Copies already shared are unaffected — a signed thing is public and permanent once shared.`,
+        'Delete letter',
+        `Delete this ${type} from your library? Its bundle stops being seeded from this machine. Copies already shared are unaffected — a signed letter is public and permanent once shared.`,
         'Delete'
       )
   if (!ok) return
@@ -568,7 +568,7 @@ async function openAccountModal(): Promise<void> {
   const confirmReplace = (): Promise<boolean> =>
     confirmDanger(
       'Replace your identity?',
-      `This permanently replaces the identity on this machine. Anything sealed to your current nostr key (${short(id.nostrPubkey)}) becomes PERMANENTLY UNOPENABLE — the new key cannot decrypt it. Things you already authored stay signed by your old address (${shortAddress(id.address)}) and will no longer read as "you". A timestamped backup of the current encrypted key file is kept beside it (identity.key.enc.bak-<time>); restoring that file is the only way back.`,
+      `This permanently replaces the identity on this machine. Anything sealed to your current nostr key (${short(id.nostrPubkey)}) becomes PERMANENTLY UNOPENABLE — the new key cannot decrypt it. Letters you already authored stay signed by your old address (${shortAddress(id.address)}) and will no longer read as "you". A timestamped backup of the current encrypted key file is kept beside it (identity.key.enc.bak-<time>); restoring that file is the only way back.`,
       'Replace identity'
     )
 
@@ -584,7 +584,7 @@ async function openAccountModal(): Promise<void> {
         showText('Restarting with your new identity…', 'neutral')
       } else {
         overlay.remove()
-        showText('New identity written — restart the shell to use it', 'success')
+        showText('New identity written — restart Souspli to use it', 'success')
       }
     } catch {
       // The invoke can reject if the app is already restarting.
@@ -858,7 +858,7 @@ function openComposeModal(): void {
   const overlay = el('div', 'evm-modal-overlay')
   const modal = el('div', 'evm-modal')
   const header = el('div', 'evm-modal-header')
-  header.append(el('span', 'evm-modal-title', 'Create a thing'))
+  header.append(el('span', 'evm-modal-title', 'Create a letter'))
   const body = el('div', 'evm-modal-body')
   body.append(
     el(
@@ -949,7 +949,7 @@ function safetyModal(keyStorage: 'os' | 'software'): void {
     el(
       'p',
       'sh-hint',
-      'Do not use this identity for anything valuable, and do not put anything in a thing that you could not bear to leak — a signed thing is public and permanent once shared.'
+      'Do not use this identity for anything valuable, and do not put anything in a letter that you could not bear to leak — a signed letter is public and permanent once shared.'
     )
   )
   const footer = el('div', 'evm-modal-footer')
@@ -1164,7 +1164,7 @@ function offerItem(o: OfferRow): HTMLElement {
   wrap.setAttribute('data-state', o.state)
 
   const line = el('div', 'sh-feed-line')
-  line.append(el('span', 'evm-badge evm-badge--neutral', o.type || 'thing'))
+  line.append(el('span', 'evm-badge evm-badge--neutral', o.type || 'letter'))
   const claim = el('span', 'sh-offer-claim', 'offered — not fetched')
   line.append(claim)
   const fetchBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm sh-offer-fetch', 'Fetch') as HTMLButtonElement
@@ -1279,7 +1279,7 @@ async function refreshFeed(): Promise<void> {
   if (offers.length > 0) {
     const title = el('div', 'sh-feed-title', `Offered · ${offers.length}`)
     title.setAttribute('data-testid', 'feed-offers-title')
-    title.title = 'Things a relay says exist. Nothing has been downloaded — pressing Fetch is what contacts anybody.'
+    title.title = 'Letters a relay says exist. Nothing has been downloaded — pressing Fetch is what contacts anybody.'
     feedPane.append(title)
     for (const o of offers) feedPane.append(offerItem(o))
   }
@@ -1329,7 +1329,7 @@ function styleModeButtons(): void {
     publishBtn.disabled = !publishable
     publishBtn.title = publishable
       ? 'Sign the previewed draft as a new instance'
-      : 'Nothing to publish yet — edit the thing first (the program streams its state as you edit)'
+      : 'Nothing to publish yet — edit it first (the program streams its state as you edit)'
   }
 }
 
@@ -1372,7 +1372,7 @@ function openShareModal(envelopeHash: string, type: string): void {
   copyBtn.setAttribute('data-testid', 'share-copy')
   const copyNote = el('div', 'sh-hint sh-share-note')
   copyNote.setAttribute('data-testid', 'share-copy-note')
-  copyNote.textContent = 'As text, for pasting into another shell’s Ingest box.'
+  copyNote.textContent = 'As text, for pasting into the Ingest box of another Souspli.'
   copyBtn.addEventListener('click', async () => {
     const r = await shell.exportBase64(envelopeHash)
     if (r.error || !r.base64) {
@@ -1418,17 +1418,17 @@ function openShareModal(envelopeHash: string, type: string): void {
 
   const warn = el('p', 'sh-share-warn')
   warn.textContent =
-    'Seeding announces this to the BitTorrent DHT: anyone with the link learns the address of whoever is serving it. A sealed thing stays encrypted, but that you hold it does not.'
+    'Seeding announces this to the BitTorrent DHT: anyone with the link learns the address of whoever is serving it. A sealed letter stays encrypted, but that you hold it does not.'
 
   const paintSeed = (magnet: string | null): void => {
     magnetSlot.replaceChildren()
     if (magnet) {
       seedBtn.textContent = 'Stop seeding'
-      seedNote.textContent = 'Being served to peers. The link works while this shell is running.'
+      seedNote.textContent = 'Being served to peers. The link works while Souspli is running.'
       magnetSlot.append(copyField('magnet link', magnet, 'share-magnet'))
     } else {
       seedBtn.textContent = 'Seed over BitTorrent'
-      seedNote.textContent = 'Off. Nothing about this thing is announced.'
+      seedNote.textContent = 'Off. Nothing about this letter is announced.'
     }
   }
 
@@ -1482,7 +1482,7 @@ function openShareModal(envelopeHash: string, type: string): void {
   relayNote.textContent = 'Checking…'
   const relayWarn = el('p', 'sh-share-warn')
   relayWarn.textContent =
-    'Posting hands this thing to every relay you have added, for anyone reading them. The bundle is unchanged and still signed by you — but the relay learns your address, and its readers learn that your key published this.'
+    'Posting hands this letter to every relay you have added, for anyone reading them. The bundle is unchanged and still signed by you — but the relay learns your address, and its readers learn that your key published this.'
   relayBtn.addEventListener('click', async () => {
     relayBtn.disabled = true
     relayNote.textContent = 'Posting…'
@@ -1669,7 +1669,7 @@ function openTransfersModal(focusId?: string): void {
     el(
       'p',
       'sh-hint',
-      'Things this shell is serving to peers. Each one announces to the BitTorrent DHT while it runs — anyone with the link learns the address serving it.'
+      'Letters this machine is serving to peers. Each one announces to the BitTorrent DHT while it runs — anyone with the link learns the address serving it.'
     ),
     sharing
   )
@@ -1698,7 +1698,7 @@ function openTransfersModal(focusId?: string): void {
       const row = el('div', 'sh-sharing-row')
       row.setAttribute('data-envelope-hash', r.envelopeHash)
       const head = el('div', 'sh-sharing-head')
-      head.append(el('span', 'evm-badge evm-badge--neutral', r.type ?? 'thing'))
+      head.append(el('span', 'evm-badge evm-badge--neutral', r.type ?? 'letter'))
       head.append(el('span', 'sh-hash evm-address evm-address--muted', short(r.envelopeHash, 8)))
       // Peers is the honest measure of whether sharing is doing anything.
       head.append(el('span', 'sh-hint', r.peers === 1 ? '1 peer' : `${r.peers} peers`))
@@ -1818,7 +1818,7 @@ function openRelaysModal(): void {
         note.textContent = String(r.error)
         return
       }
-      note.textContent = `Connected to ${url}. You will start receiving things posted there.`
+      note.textContent = `Connected to ${url}. You will start receiving letters posted there.`
       input.value = ''
       await refresh()
     } finally {
@@ -1833,7 +1833,7 @@ function openRelaysModal(): void {
     el(
       'p',
       'sh-hint',
-      'A relay is how a thing reaches you when nobody handed you its bytes. It has no authority: everything a relay sends is checked exactly like a file from a stranger, and the signature — never the relay — says who wrote it.'
+      'A relay is how a letter reaches you when nobody handed you its bytes. It has no authority: everything a relay sends is checked exactly like a file from a stranger, and the signature — never the relay — says who wrote it.'
     ),
     list,
     el('h3', 'sh-transfers-h', 'Add a relay'),
@@ -1842,7 +1842,7 @@ function openRelaysModal(): void {
     el(
       'p',
       'sh-share-warn',
-      'Subscribing tells the relay what you are interested in, and your address. Posting tells it — and everyone reading it — that your key published that thing. Nothing is posted automatically: each one is a separate act, from Share.'
+      'Subscribing tells the relay what you are interested in, and your address. Posting tells it — and everyone reading it — that your key published that letter. Nothing is posted automatically: each one is a separate act, from Share.'
     )
   )
 
@@ -1885,7 +1885,7 @@ function openPetnameModal(scheme: string, key: string, current: string | null): 
   header.append(el('span', 'evm-modal-title', current ? 'Rename this key' : 'Name this key'))
   const body = el('div', 'evm-modal-body')
   body.append(
-    el('p', 'sh-hint', 'Your name for this key, kept on this machine. It never enters a thing and nobody else sees it — which is exactly why it is worth something: they cannot choose it.')
+    el('p', 'sh-hint', 'Your name for this key, kept on this machine. It never enters a letter and nobody else sees it — which is exactly why it is worth something: they cannot choose it.')
   )
   body.append(copyField('key', `${scheme}:${key}`, 'petname-key'))
 
@@ -1948,7 +1948,7 @@ function openPeopleModal(): void {
   const list = el('div', 'sh-people-list')
   list.setAttribute('data-testid', 'people-list')
   body.append(
-    el('p', 'sh-hint', 'Every key whose things you hold. A name here is yours alone — it stays on this machine, and says you recognise the key, not that you trust it.'),
+    el('p', 'sh-hint', 'Every key whose letters you hold. A name here is yours alone — it stays on this machine, and says you recognise the key, not that you trust it.'),
     el(
       'p',
       'sh-hint',
@@ -1976,7 +1976,7 @@ function openPeopleModal(): void {
       const lab = authorLabel({ authorScheme: r.authorScheme, authorKey: r.authorKey, petname: r.name })
       const nameEl = el('span', lab.named ? 'sh-name sh-name--pet' : 'evm-address evm-address--muted', lab.text)
       nameEl.setAttribute('title', lab.title)
-      const count = el('span', 'sh-hint', r.things === 1 ? '1 thing' : `${r.things} things`)
+      const count = el('span', 'sh-hint', r.things === 1 ? '1 letter' : `${r.things} letters`)
       const mine = isMine(r)
       const btn = el('button', 'evm-btn evm-btn--ghost evm-btn--sm', r.name ? 'Rename' : 'Name…') as HTMLButtonElement
       btn.setAttribute('data-testid', 'people-name')
@@ -2057,7 +2057,7 @@ async function openAttestationsModal(target: string): Promise<void> {
     el(
       'p',
       'sh-hint',
-      'Things in your library that put a signature behind a statement about this. Each signature proves who said it — not that it is true, and not that this thing’s author agreed.'
+      'Letters in your library that put a signature behind a statement about this. Each signature proves who said it — not that it is true, and not that this letter’s author agreed.'
     )
   )
   // "5 attestations, 3 from your tribe" -- the second half is the part that
@@ -2205,7 +2205,7 @@ async function openHistoryModal(authorKey: string, path: string, currentHash: st
     el(
       'p',
       'sh-hint',
-      'Every version this author has published on this line, oldest first. Each one is its own signed thing — an earlier version is not deleted or corrected, it is simply superseded.'
+      'Every version this author has published on this line, oldest first. Each one is its own signed letter — an earlier version is not deleted or corrected, it is simply superseded.'
     )
   )
   body.setAttribute('data-count', String(rows.length))
@@ -2476,7 +2476,7 @@ function forumPostBody(
       locator: String(row.locator ?? ''),
       relayUrl: String(row.relayUrl ?? ''),
       poster: String(row.poster ?? ''),
-      type: String(row.type ?? 'thing'),
+      type: String(row.type ?? 'letter'),
       inGroup: rootHash,
       replyTo: null,
       state: (row.offerState as OfferRow['state']) ?? 'offered',
@@ -2545,7 +2545,7 @@ async function openRepliesModal(target: string): Promise<void> {
     el(
       'p',
       'sh-hint',
-      'Things in your library that claim to reply to this, and to each other. A reply is the commenter’s claim — like a timestamp, nothing binds it to this thing or its author.'
+      'Letters in your library that claim to reply to this, and to each other. A reply is the commenter’s claim — like a timestamp, nothing binds it to this letter or its author.'
     )
   )
   if (rows.length === 0) body.append(el('div', 'evm-empty', 'Nothing in your library replies to this.'))
@@ -2674,7 +2674,7 @@ function renderHeader(h: HeaderFacts | null): void {
     previewBadge = null
     publishBtn = null
     repliesBadge = null
-    thingHeader.append(el('span', 'sh-hint', 'Select a thing from the feed.'))
+    thingHeader.append(el('span', 'sh-hint', 'Select a letter from the feed.'))
     return
   }
   // Signature status: everything in the library is admission-`valid`, so a
@@ -2755,7 +2755,7 @@ function renderHeader(h: HeaderFacts | null): void {
   if (h.draft) amendBtn.style.display = 'none' // nothing published to amend yet
   amendBtn.title = h.mine
     ? 'Publish a new version, chained to this one'
-    : 'Start your own version of this. It is chained to theirs, but it is your line — you cannot publish a new version of someone else’s thing.'
+    : 'Start your own version of this. It is chained to theirs, but it is your line — you cannot publish a new version of someone else’s letter.'
   amendBtn.addEventListener('click', () => {
     void shell.amend(h.envelopeHash).then((r) => {
       if (!r.id) return showText(`Could not start a version: ${String(r.error ?? 'unknown')}`, 'danger')
@@ -2841,7 +2841,7 @@ function renderHeader(h: HeaderFacts | null): void {
     rt.setAttribute('data-known', known ? '1' : '0')
     rt.title = known
       ? `${h.replyTo} — click to open`
-      : `${h.replyTo} — not in your library: you have the reply, not the thing it claims to answer`
+      : `${h.replyTo} — not in your library: you have the reply, not the letter it claims to answer`
     if (known) {
       rt.setAttribute('role', 'button')
       rt.addEventListener('click', () => void openThing(h.replyTo!))
@@ -2927,7 +2927,7 @@ function renderHeader(h: HeaderFacts | null): void {
     vb.setAttribute('data-testid', 'header-vouch-about')
     vb.setAttribute('data-known', known ? '1' : '0')
     vb.title = known
-      ? `${h.vouchAboutScheme}:${h.vouchAbout} — you hold things by this key`
+      ? `${h.vouchAboutScheme}:${h.vouchAbout} — you hold letters by this key`
       : `${h.vouchAboutScheme}:${h.vouchAbout} — you hold nothing by this key, so this vouch is about a stranger to you`
     replyBits.push(vb)
   }
@@ -2941,7 +2941,7 @@ function renderHeader(h: HeaderFacts | null): void {
     at.setAttribute('data-known', known ? '1' : '0')
     at.title = known
       ? `${h.attests} — click to open`
-      : `${h.attests} — not in your library: you have the attestation, not the thing it speaks about`
+      : `${h.attests} — not in your library: you have the attestation, not the letter it speaks about`
     if (known) {
       at.setAttribute('role', 'button')
       at.addEventListener('click', () => void openThing(h.attests!))
@@ -2993,7 +2993,7 @@ function renderHeader(h: HeaderFacts | null): void {
         chip.title =
           relayed.length > 0
             ? `Handed to you on ${relayed[0]!.relayUrl} by ${relayed[0]!.poster}. That is who passed it along, NOT who wrote it — the author is the key this row names, because the author is whoever signed it.`
-            : `Posted to ${arrivals[0]!.relayUrl} by its own author: the key that signed this thing is the key that posted it.`
+            : `Posted to ${arrivals[0]!.relayUrl} by its own author: the key that signed this letter is the key that posted it.`
         thingHeader.append(chip)
       })
       .catch(() => undefined)
@@ -3009,7 +3009,7 @@ function renderHeader(h: HeaderFacts | null): void {
     seat.setAttribute('data-hops', String(h.authorHops))
     seat.title =
       h.authorHops === 1
-        ? 'You have vouched for this key. That records that you know them — nothing about this thing.'
+        ? 'You have vouched for this key. That records that you know them — nothing about this letter.'
         : 'Reached through someone you vouched for. It says how you know of them, not that they are honest.'
     seatBits.push(seat)
   }
@@ -3078,7 +3078,7 @@ shell.onConfirmRequest((req) => {
       ? 'Publish a new instance?'
       : req.kind === 'cosign'
         ? 'Add your signature to this document?'
-        : `A thing wants to ${req.kind}`
+        : `A letter wants to ${req.kind}`
   header.append(el('span', 'evm-modal-title', title))
   const body = el('div', 'evm-modal-body')
   body.append(
@@ -3086,7 +3086,7 @@ shell.onConfirmRequest((req) => {
       'p',
       'sh-hint',
       req.kind === 'publish'
-        ? 'This signs the previewed draft with your identity as a new thing in your feed. Nothing happens until you approve it here.'
+        ? 'This signs the previewed draft with your identity as a new letter in your feed. Nothing happens until you approve it here.'
         : req.kind === 'cosign'
           ? 'This signs the exact document below with your identity — the same bytes the earlier signers signed, unchanged. Your signature is public, permanent, and cannot be withdrawn.'
           : 'This request grants nothing until you approve it here.'

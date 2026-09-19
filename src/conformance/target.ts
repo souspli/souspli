@@ -86,7 +86,7 @@ export interface ConformanceTarget {
 // ── Our reference implementation, wired to the interface ─────────────────────
 
 export const formatTarget: ConformanceTarget = {
-  name: '@yourproject/format',
+  name: '@souspli/format',
 
   sha256(bytes) {
     return hash(bytes)

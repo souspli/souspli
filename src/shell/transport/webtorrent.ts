@@ -102,8 +102,8 @@ export function torrentDiscoveryOptions(): WebTorrentOptions {
 export async function loadWebTorrent(): Promise<WebTorrentCtor> {
   try {
     // Non-literal specifier: keeps this an opaque runtime dynamic import, so tsc
-    // needn't resolve `webtorrent` at build (it is an optional, uninstalled dep)
-    // and vite won't try to bundle it.
+    // needn't resolve `webtorrent` at build (it ships no types of its own) and
+    // vite won't try to bundle it.
     const specifier = 'webtorrent'
     const mod = (await import(specifier)) as { default: WebTorrentCtor }
     return mod.default

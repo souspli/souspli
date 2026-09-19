@@ -1,6 +1,6 @@
 name: release
 
-# Build the shell's installers for macOS, Windows, and Linux, and attach them to
+# Build Souspli's installers for macOS, Windows, and Linux, and attach them to
 # a GitHub Release. Triggered by pushing a version tag (v*), or manually.
 #
 #   git tag v0.1.0 && git push origin v0.1.0
@@ -92,9 +92,9 @@ jobs:
           body: |
             **Experimental alpha.** Unsigned builds:
             - **macOS** — right-click the app → Open (Gatekeeper), or
-              `xattr -dr com.apple.quarantine "/Applications/Shell.app"`.
+              `xattr -dr com.apple.quarantine "/Applications/Souspli.app"`.
             - **Windows** — SmartScreen: More info → Run anyway.
-            - **Linux** — `chmod +x Shell-*.AppImage` then run; or install the `.deb`.
+            - **Linux** — `chmod +x Souspli-*.AppImage` then run; or install the `.deb`.
 
             Your identity key is stored in **software** on your device. Do not use
             it for anything valuable. See the in-app safety notice.

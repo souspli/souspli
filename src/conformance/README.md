@@ -1,4 +1,4 @@
-# @yourproject/conformance
+# @souspli/conformance
 
 The interop suite. It is what lets a **second implementation prove it agrees**
 with this one — byte for byte, outcome for outcome — so that a thing signed,
@@ -23,7 +23,7 @@ In TypeScript, implement `ConformanceTarget` (the small set of format operations
 the suite drives) and hand it to `runAll`:
 
 ```ts
-import { formatTarget, loadVectors, runAll } from '@yourproject/conformance'
+import { formatTarget, loadVectors, runAll } from '@souspli/conformance'
 
 const results = runAll(formatTarget, loadVectors())
 const failed = results.filter((r) => !r.ok)

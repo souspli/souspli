@@ -91,6 +91,11 @@ protocol.registerSchemesAsPrivileged([
 app.commandLine.appendSwitch('force-webrtc-ip-handling-policy', 'disable_non_proxied_udp')
 app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns')
 
+// One name on every OS. Without this Electron resolves it per platform —
+// package.json `name` on Windows/Linux, the bundle name on macOS — so userData
+// would land in differently-named directories depending on where it runs.
+app.setName('Souspli')
+
 // Hermetic profile: when SHELL_USER_DATA_DIR is set (tests, alternate
 // profiles), move Electron's OWN userData there too. Otherwise the default
 // session's storage (e.g. the chrome's safety-ack localStorage) lands in the
@@ -455,7 +460,7 @@ app.whenReady().then(async () => {
     const keyPath = e instanceof KeyringLoadError ? e.path : join(userDataDir, 'identity.key.enc')
     const msg =
       `Your identity file could not be read:\n\n${keyPath}\n\n` +
-      `The shell will NOT overwrite it — it may still be recoverable. ` +
+      `Souspli will NOT overwrite it — it may still be recoverable. ` +
       `Timestamped backups (identity.key.enc.bak-<time>) may exist in the same folder; ` +
       `restoring one recovers that identity. To start with a brand-new identity instead, ` +
       `move the unreadable file out of that folder and relaunch.`
@@ -508,7 +513,7 @@ app.whenReady().then(async () => {
   dbg('window')
 
   // ── Window + chrome ────────────────────────────────────────────────────────
-  const win = new BaseWindow({ width: 1200, height: 820, backgroundColor: '#08080a', title: 'the shell' })
+  const win = new BaseWindow({ width: 1200, height: 820, backgroundColor: '#08080a', title: 'Souspli' })
   const chrome = new WebContentsView({
     webPreferences: { preload: CHROME_PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false }
   })
@@ -544,7 +549,7 @@ app.whenReady().then(async () => {
               void dialog.showMessageBox(win, {
                 type: 'info',
                 title: 'About',
-                message: 'the shell',
+                message: 'Souspli',
                 detail: [
                   `version ${appVersion()}`,
                   `Electron ${process.versions.electron} · Chromium ${process.versions.chrome}`
@@ -755,7 +760,7 @@ app.whenReady().then(async () => {
     if (result.status === 'valid' && expect !== undefined && hex(result.envelopeHash) !== expect) {
       return {
         status: 'invalid',
-        reason: `this is a different thing: asked for ${expect.slice(0, 12)}…, got ${hex(result.envelopeHash).slice(0, 12)}…`,
+        reason: `this is a different letter: asked for ${expect.slice(0, 12)}…, got ${hex(result.envelopeHash).slice(0, 12)}…`,
         expected: expect,
         got: hex(result.envelopeHash)
       }
@@ -1322,7 +1327,7 @@ app.whenReady().then(async () => {
    *  new bridge capability. */
   function newComment(targetHash: unknown): Record<string, unknown> {
     if (typeof targetHash !== 'string' || !HEX64.test(targetHash)) return { error: 'bad hash' }
-    if (!library.get(targetHash)) return { error: 'that thing is not in your library' }
+    if (!library.get(targetHash)) return { error: 'that letter is not in your library' }
     // A reply inside a forum stays in that forum. Carried from the thing being
     // answered rather than asked for: a reader pressing Comment on a post is
     // not separately deciding to post to the forum, and a reply that silently
@@ -1335,7 +1340,7 @@ app.whenReady().then(async () => {
    *  program can never learn a hash by itself, so the SHELL seeds it. */
   function newAttestation(targetHash: unknown): Record<string, unknown> {
     if (typeof targetHash !== 'string' || !HEX64.test(targetHash)) return { error: 'bad hash' }
-    if (!library.get(targetHash)) return { error: 'that thing is not in your library' }
+    if (!library.get(targetHash)) return { error: 'that letter is not in your library' }
     return newDraft('starter:attestation', { attests: targetHash })
   }
 
@@ -1540,7 +1545,7 @@ app.whenReady().then(async () => {
   async function castVote(targetHash: unknown, direction: unknown): Promise<Record<string, unknown>> {
     if (typeof targetHash !== 'string' || !HEX64.test(targetHash)) return { error: 'bad hash' }
     if (direction !== 1 && direction !== -1) return { error: 'a vote is +1 or -1' }
-    if (!library.get(targetHash)) return { error: 'that thing is not in your library' }
+    if (!library.get(targetHash)) return { error: 'that letter is not in your library' }
     const current = library.myVote(keyring.signer.scheme, myKeyHex(), targetHash)
     if (current && current.dir === direction) return { error: 'you have already voted that way' }
     const starter = starterByKey('starter:vote')
@@ -2087,7 +2092,7 @@ app.whenReady().then(async () => {
     }
     const stored = library.load(envelopeHash)
     if (!stored) return { status: 'invalid', reason: 'not found or not mountable (sealed, undecrypted)' }
-    if (stored.row.sealed) return { status: 'invalid', reason: 'refusing to copy a sealed thing into a public one' }
+    if (stored.row.sealed) return { status: 'invalid', reason: 'refusing to copy a sealed letter into a public one' }
     // Copy rebuilds the same program/type/args, and a manifest has no author
     // and no nonce -- so on a document that names signatories, Copy IS a
     // co-signature, and would silently put your key on a contract. Refuse and
@@ -2168,7 +2173,7 @@ app.whenReady().then(async () => {
     if (stored.row.sealed) {
       // The plaintext manifest lives only in the ephemeral store; re-signing it
       // would write decrypted bytes into a public bundle.
-      return { status: 'invalid', reason: 'refusing to co-sign a sealed thing into a public one' }
+      return { status: 'invalid', reason: 'refusing to co-sign a sealed letter into a public one' }
     }
     const manifestHash = stored.row.manifestHash
     const facts = documentFacts(manifestHash)
@@ -2265,7 +2270,7 @@ app.whenReady().then(async () => {
         seeder.setDownloadState(
           id,
           'failed',
-          `this is ${Math.round(size / 1048576)} MB, over the ${Math.round(fetchLimits.maxBytes / 1048576)} MB limit a thing may be`
+          `this is ${Math.round(size / 1048576)} MB, over the ${Math.round(fetchLimits.maxBytes / 1048576)} MB limit a letter may be`
         )
         library.forgetTransfer(id)
         seeder.cancelDownload(id)
@@ -2352,7 +2357,7 @@ app.whenReady().then(async () => {
     if (!row) return { error: 'not found' }
     const stored = library.load(envelopeHash)
     if (!stored) return { error: 'not loadable (sealed, undecrypted)' }
-    if (row.sealed) return { error: 'refusing to amend a sealed thing into a public one' }
+    if (row.sealed) return { error: 'refusing to amend a sealed letter into a public one' }
 
     // Continue the chain this thing is in, or root a new one on it.
     const path = row.path ?? envelopeHash
@@ -2365,7 +2370,7 @@ app.whenReady().then(async () => {
     try {
       seed = cborToJs(stored.manifest.args)
     } catch {
-      return { error: 'that thing has args this shell cannot re-edit' }
+      return { error: 'that letter has args Souspli cannot re-edit' }
     }
     const draft = library.createDraft({ type: row.type, progHash: row.progHash, args: seed })
     library.setDraftChain(draft.id, path, seq, envelopeHash)
@@ -2677,7 +2682,7 @@ app.whenReady().then(async () => {
     // A sealed thing is addressed to named readers. Handing it to a relay
     // would not reveal its contents, but it would publish the fact of it to
     // everyone -- so this refuses rather than deciding that for the human.
-    if (row.sealed) return { error: 'refusing to post a sealed thing to a relay' }
+    if (row.sealed) return { error: 'refusing to post a sealed letter to a relay' }
     if (nostr.status().length === 0) return { error: 'no relays — add one first' }
     const exported = exportThing(envelopeHash)
     if ('error' in exported) return { error: exported.error }
@@ -3039,9 +3044,9 @@ app.whenReady().then(async () => {
       const envHash = String(outcome.envelopeHash ?? 'thing')
       const safeType = (input.type.trim() || 'thing').replace(/[^a-z0-9-]/gi, '-')
       const res = await dialog.showSaveDialog(win, {
-        title: 'Save thing to share',
+        title: 'Save letter to share',
         defaultPath: `${safeType}-${envHash.slice(0, 8)}.thing`,
-        filters: [{ name: 'thing bundle', extensions: ['thing'] }]
+        filters: [{ name: 'Souspli letter', extensions: ['thing'] }]
       })
       if (res.canceled || !res.filePath) return { outcome, path: null }
       await writeFile(res.filePath, tar)
@@ -3053,9 +3058,9 @@ app.whenReady().then(async () => {
     const r = exportThing(h)
     if ('error' in r) return { path: null, error: r.error }
     const res = await dialog.showSaveDialog(win, {
-      title: 'Save thing to share',
+      title: 'Save letter to share',
       defaultPath: r.filename,
-      filters: [{ name: 'thing bundle', extensions: ['thing'] }]
+      filters: [{ name: 'Souspli letter', extensions: ['thing'] }]
     })
     if (res.canceled || !res.filePath) return { path: null }
     await writeFile(res.filePath, r.tar)
