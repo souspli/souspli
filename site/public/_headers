@@ -4,3 +4,6 @@
   Referrer-Policy: no-referrer
   Permissions-Policy: interest-cohort=(), browsing-topics=()
   Cache-Control: public, max-age=300, must-revalidate
+
+/img/*
+  Cache-Control: public, max-age=86400

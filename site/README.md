@@ -56,6 +56,21 @@ connect-src https://cloudflareinsights.com` there.
   dark from `prefers-color-scheme`. The favicon is a `data:` URI, so a page view is
   exactly one request.
 
+## The screenshot
+
+`public/img/app.jpg` is the real app, captured headlessly on a populated library by
+[`tools/screenshot/capture.mjs`](../tools/screenshot/capture.mjs) (the window is two
+native views, so it composites them at their real bounds). Regenerate it after a
+visible UI change:
+
+```bash
+pnpm world provision && pnpm world seed && pnpm build
+xvfb-run -a -s "-screen 0 1920x1200x24" node tools/screenshot/capture.mjs
+```
+
+It is the one image on the site: lazy-loaded, sized in the markup so nothing shifts,
+and below the first screen so the page still paints from its first round trip.
+
 ## Deploying (Cloudflare Pages)
 
 | Setting | Value |

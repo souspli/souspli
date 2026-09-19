@@ -329,7 +329,10 @@ body {
 
 /* A petname reads as a NAME, never with the ✓ treatment a verified name gets:
    one is proof, the other is what you decided to call someone. */
-.sh-name--pet { font-weight: var(--evm-weight-semibold); color: var(--evm-text-1); }
+/* ...and on ONE line. The header row lets text shrink when it overflows, which
+   broke "Grace Hopper" in two inside a 44px strip; a name is short, it is the
+   reader's own, and the row scrolls if it must. */
+.sh-name--pet { font-weight: var(--evm-weight-semibold); color: var(--evm-text-1); white-space: nowrap; }
 .sh-feed-named { color: var(--evm-text-1); }
 .sh-nameable { cursor: pointer; }
 .sh-nameable:hover { text-decoration: underline dotted; }
