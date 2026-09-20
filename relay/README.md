@@ -83,17 +83,29 @@ credentials leave your browser):
 
    | | |
    |---|---|
+   | Production branch | **`master`** (Cloudflare's default is `main`) |
    | Root directory | `relay` (no leading slash) |
    | Build command | *(empty)* |
-   | Deploy command | `npm ci && npx wrangler deploy` |
+   | Deploy command | `npx wrangler deploy` *(the default)* |
+   | Non-production branch deploy command | `npx wrangler versions upload` *(the default)* |
    | Build variable | `SKIP_DEPENDENCY_INSTALL` = `1` |
 
-   The variable matters. This package is npm, but it lives in a repository whose
+   **The variable matters.** This package is npm, but it lives in a repository whose
    root is a **pnpm** project, so Cloudflare's automatic step runs `pnpm install`
    here, walks up to the root `pnpm-workspace.yaml` — which pnpm 11 uses for
-   settings only — and fails with *"packages field missing or empty"*. Skipping the
-   automatic install and running `npm ci` ourselves avoids that, and guarantees the
-   desktop app's dependencies are never installed to deploy a relay.
+   settings only — and fails with *"packages field missing or empty"*. It also
+   guarantees the desktop app's dependencies are never installed to deploy a relay.
+
+   With the automatic install off, the package installs its own: `wrangler.jsonc`
+   runs `scripts/ensure-deps.mjs` before bundling, which does `npm ci --omit=dev` if
+   `@noble/*` are missing and nothing otherwise. So **both** default commands work
+   as they are — you do not have to remember `npm ci` in two fields.
+
+   **The production branch matters too.** If it is left at `main`, every build of
+   `master` is treated as a preview and runs `wrangler versions upload`, which can
+   upload a version but **cannot create the Durable Object** — migrations are only
+   applied by `wrangler deploy`. The log line to look for is
+   `Executing user deploy command:` — it should say `npx wrangler deploy`.
 4. Save and deploy. The first deploy creates the Durable Object (migration `v1`) and,
    because `wrangler.jsonc` declares `relay.souspli.org` as a custom domain on a zone
    this account already holds, the DNS record and certificate too.

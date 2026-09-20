@@ -3,6 +3,10 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "souspli-relay",
   "main": "src/index.ts",
+  // Installs this package's dependencies if they are missing, before bundling.
+  // It makes a deploy independent of WHICH command the dashboard runs (there are
+  // two, production and non-production) and is a no-op locally. See the script.
+  "build": { "command": "node scripts/ensure-deps.mjs" },
   "compatibility_date": "2026-09-01",
   // The custom domain: Cloudflare creates the DNS record and the certificate.
   // The zone is already on this account, so nothing else is needed.
