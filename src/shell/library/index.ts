@@ -5,6 +5,7 @@ import { mkdirSync } from 'node:fs'
 import { CasStore, EphemeralStore, type AttachmentStore } from '../../main/store.js'
 import { claimedTitle } from './title.js'
 import { SHELL_PINNED_KEYS, pinsOf, type Pins } from './pins.js'
+import { claimedKey } from './keys.js'
 import {
   decodeManifest,
   toHex,
@@ -180,8 +181,8 @@ function argString(args: unknown, key: string): string {
  *  so this only checks it is plausible hex of a sane length -- the shell never
  *  invents a key, it only indexes what the author claimed. */
 export function vouchSubject(args: unknown): { scheme: string; key: string } | null {
-  const key = argString(args, 'about').toLowerCase()
-  if (!/^[0-9a-f]{40,64}$/.test(key)) return null
+  const key = claimedKey(argString(args, 'about'))
+  if (!key) return null
   const scheme = argString(args, 'aboutScheme') || 'eth-eip191'
   return { scheme, key }
 }
@@ -231,8 +232,8 @@ export function declaredSigners(args: unknown, field = 'signers'): DeclaredSigne
   if (!Array.isArray(raw)) return []
   const out: DeclaredSigner[] = []
   for (const entry of raw.slice(0, 64)) {
-    const key = argString(entry, 'key').toLowerCase()
-    if (!/^[0-9a-f]{40,64}$/.test(key)) continue // junk is program data, not a party
+    const key = claimedKey(argString(entry, 'key'))
+    if (!key) continue // junk is program data, not a party
     out.push({
       scheme: argString(entry, 'scheme') || 'eth-eip191',
       key,
@@ -644,6 +645,7 @@ export class Library {
     `)
     this.backfillRefs()
     this.backfillTitles()
+    this.backfillParties()
   }
 
   /** A one-way marker for something that must happen at most once per library
@@ -718,6 +720,68 @@ export class Library {
       /* backfill is best-effort; the library must still open */
     }
     this.db.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)').run('refs_backfill_v3', '1')
+  }
+
+  /** Rosters, named signatories and vouches are indexed when a thing is stored,
+   *  so a thing stored while `0x`-prefixed keys were being dropped is missing
+   *  its people for good -- including, for whoever keeps a forum, themselves.
+   *  Re-read them once. INSERT OR REPLACE throughout, so a row that was indexed
+   *  correctly the first time is simply written again. Same rules as the other
+   *  passes: public things only, best-effort, never allowed to stop the open. */
+  private backfillParties(): void {
+    if (this.metaGet('parties_backfill_v1')) return
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT envelope_hash, author_scheme, author_key, type, created, manifest_hash
+             FROM things WHERE sealed = 0`
+        )
+        .all() as { envelope_hash: string; author_scheme: string; author_key: string; type: string; created: number; manifest_hash: string }[]
+      const member = this.db.prepare(
+        'INSERT OR REPLACE INTO group_members (envelope_hash, idx, scheme, key, role, name) VALUES (?,?,?,?,?,?)'
+      )
+      const signer = this.db.prepare(
+        'INSERT OR REPLACE INTO doc_signers (manifest_hash, idx, scheme, key, role, name) VALUES (?,?,?,?,?,?)'
+      )
+      const vouch = this.db.prepare(
+        `INSERT OR REPLACE INTO vouches
+           (envelope_hash, voucher_scheme, voucher_key, about_scheme, about_key, name, relation, created)
+         VALUES (?,?,?,?,?,?,?,?)`
+      )
+      this.db.transaction(() => {
+        for (const r of rows) {
+          const bytes = this.cas.readAll(r.manifest_hash)
+          if (!bytes) continue
+          try {
+            const args = decodeManifest(bytes).args
+            declaredSigners(args).forEach((sg, i) => signer.run(r.manifest_hash, i, sg.scheme, sg.key, sg.role, sg.name))
+            if (r.type === 'group') {
+              declaredSigners(args, 'members').forEach((m, i) => member.run(r.envelope_hash, i, m.scheme, m.key, m.role, m.name))
+            }
+            if (r.type === 'vouch') {
+              const subject = vouchSubject(args)
+              if (subject) {
+                vouch.run(
+                  r.envelope_hash,
+                  r.author_scheme,
+                  r.author_key,
+                  subject.scheme,
+                  subject.key,
+                  argString(args, 'name'),
+                  argString(args, 'relation'),
+                  r.created
+                )
+              }
+            }
+          } catch {
+            /* undecodable manifest — skip it, never fail the open */
+          }
+        }
+      })()
+    } catch {
+      /* backfill is best-effort; the library must still open */
+    }
+    this.db.prepare('INSERT OR REPLACE INTO meta (k, v) VALUES (?, ?)').run('parties_backfill_v1', '1')
   }
 
   /** Libraries from before titles existed hold things that have never been

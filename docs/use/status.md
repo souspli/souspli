@@ -34,7 +34,7 @@ macOS, Windows and Linux):
 | **Hardware wallets, OS-backed signing** | Keys are held in software. |
 | **Other signature schemes for writing** | Letters are signed with an Ethereum-style key only. Nostr-key signatures verify on receipt; the SSH scheme in the specification is not implemented. |
 | **Signed installers, auto-update** | Your OS will warn on first launch, and you update by hand. |
-| **A busy place to go** | The app suggests the project's relay (and its welcome forum, once one is bundled) — offered, never connected silently. It is new and small; do not expect a crowd. |
+| **A busy place to go** | The app suggests the project's relay and its welcome forum, *Coffee Talk* — offered, never connected silently. It is new and small; do not expect a crowd. |
 | **Opening enclosed PDFs and documents** | They travel intact and can be exported, but the container cannot display them. |
 | **Mobile, or a web viewer** | Desktop only. |
 

@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { admitBundle, cborToJs, parseBundle } from '../../src/format/index.js'
+import { claimedKey } from '../../src/shell/library/keys.js'
 
 const OUT = join(__dirname, '..', '..', 'src', 'shell', 'welcome', 'forum.thing.b64')
 const hex = (b: Uint8Array): string => Buffer.from(b).toString('hex')
@@ -60,7 +61,18 @@ if (sha(r.program) !== sha(canonical) && !process.argv.includes('--force')) {
 }
 
 const args = cborToJs(r.manifest.args) as { name?: unknown; purpose?: unknown; members?: unknown }
-const members = Array.isArray(args.members) ? (args.members as { role?: string; name?: string }[]) : []
+const members = Array.isArray(args.members) ? (args.members as { role?: string; name?: string; key?: string }[]) : []
+// Read every key the way the APP will. A roster entry whose key the app cannot
+// parse is silently not a member -- and if that entry is the keeper's own, the
+// forum ships with a moderator who moderates nothing.
+const unreadable = members.filter((m) => claimedKey(String(m.key ?? '')) === null)
+if (unreadable.length > 0) {
+  throw new Error(`the app cannot read the key of: ${unreadable.map((m) => m.name || '(unnamed)').join(', ')} — a key is 40 or 64 hex characters, with or without 0x`)
+}
+const isMod = (m: { role?: string }): boolean => /^mod(erator)?$/i.test(String(m.role ?? '').trim())
+if (!members.some((m) => isMod(m) && claimedKey(String(m.key)) === hex(r.envelope.author.k))) {
+  console.log('  WARNING   the keeper is not listed as a moderator of their own forum.')
+}
 
 writeFileSync(OUT, Buffer.from(bytes).toString('base64').replace(/(.{100})/g, '$1\n') + '\n')
 console.log(`wrote ${OUT}`)
@@ -68,8 +80,8 @@ console.log(`  forum     ${String(args.name ?? '(unnamed)')}`)
 console.log(`  purpose   ${String(args.purpose ?? '')}`)
 console.log(`  keeper    0x${hex(r.envelope.author.k)}  (${r.envelope.author.s})`)
 console.log(`  root      ${hex(r.envelopeHash)}   ← the forum's identity; posts carry it as inGroup`)
-console.log(`  roster    ${members.length} listed; moderators: ${members.filter((m) => m.role === 'moderator').map((m) => m.name || '?').join(', ') || 'none'}`)
-if (!members.some((m) => m.role === 'moderator')) {
+console.log(`  roster    ${members.length} listed; moderators: ${members.filter(isMod).map((m) => m.name || '?').join(', ') || 'none'}`)
+if (!members.some(isMod)) {
   console.log('  note      no moderators are named, so nothing in this forum is moderated for anyone.')
 }
 console.log('Next: post this letter to the relay from the app (Share… → Post to relays), then commit the file.')

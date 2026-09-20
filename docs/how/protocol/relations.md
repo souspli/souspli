@@ -81,6 +81,14 @@ the moment the keeper publishes a roster naming them.
 | `group` | `{ name, purpose, members: [{ key, scheme, role, name }], notes }` | A roster. Being listed is the keeper's claim — **never a trust input**. |
 | `contract` | `{ title, body, signers: [{ key, scheme, role, name }] }` | Expected signatories. Being named is not consent and not a signature. |
 
+**How a key is written.** `key` and `about` are hex — 40 characters for an
+Ethereum-style address, 64 for an x-only key — and a reader MUST treat an optional
+`0x` prefix and any letter case as the same key: clients display addresses as
+`0xD879…`, so that is what people paste into a roster. Anything else is program
+data and is ignored. (The reference client once accepted bare lowercase hex only and
+dropped the rest silently; a forum's keeper listed themselves as moderator and was
+ignored by their own app.)
+
 **Tribe.** A reader computes trust only by walking `vouch` edges *outward from its
 own key*, to depth 2. Vouch counts are free to manufacture; a path from yourself is
 not. Rosters, votes and inbound vouches never feed it.
