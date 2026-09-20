@@ -14,6 +14,7 @@
 // Later versions of the roster are NOT bundled. They reach people the way every
 // letter does -- post them to the relay -- and the app reads membership and
 // moderators from the latest version a reader holds.
+import { createHash } from 'node:crypto'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { admitBundle, cborToJs, parseBundle } from '../../src/format/index.js'
@@ -21,9 +22,9 @@ import { admitBundle, cborToJs, parseBundle } from '../../src/format/index.js'
 const OUT = join(__dirname, '..', '..', 'src', 'shell', 'welcome', 'forum.thing.b64')
 const hex = (b: Uint8Array): string => Buffer.from(b).toString('hex')
 
-const file = process.argv[2]
+const file = process.argv.slice(2).find((a) => !a.startsWith('--')) ?? (process.argv.includes('--clear') ? '--clear' : undefined)
 if (!file) {
-  console.error('usage: pnpm welcome:forum <group.thing>    (or --clear to remove it)')
+  console.error('usage: pnpm welcome:forum <group.thing> [--force]    (or --clear to remove it)')
   process.exit(2)
 }
 if (file === '--clear') {
@@ -40,6 +41,24 @@ if (r.manifest.type !== 'group') throw new Error(`that is a '${r.manifest.type}'
 if (r.envelope.seq !== undefined && r.envelope.seq !== null && r.envelope.seq > 1) {
   throw new Error(`that is version ${r.envelope.seq} of a roster. Bundle the FIRST version: its hash is the forum's identity, and every post names it.`)
 }
+// The welcome forum of all letters should be an instance of the CANONICAL Group
+// type -- the one every install has built in -- so that every reader's app
+// recognises it, and "New" does not grow a second, look-alike Group. A letter
+// made by an app built from a CRLF checkout carries the same program with
+// different line endings, which is a different hash and so a different type.
+const canonical = new Uint8Array(readFileSync(join(__dirname, '..', '..', 'samples', 'group.html')))
+const sha = (b: Uint8Array): string => createHash('sha256').update(b).digest('hex')
+if (sha(r.program) !== sha(canonical) && !process.argv.includes('--force')) {
+  const stripped = Uint8Array.from(Buffer.from(r.program).filter((x) => x !== 13))
+  const why =
+    sha(stripped) === sha(canonical)
+      ? 'It is the built-in Group program with CRLF line endings: the app that made it was built from a checkout where git converted LF to CRLF (Windows, core.autocrlf). Pull the .gitattributes fix, re-checkout (git rm --cached -r . && git reset --hard — commit or stash first), rebuild, and make the group again.'
+      : 'It was made with a different program altogether.'
+  throw new Error(
+    `this group is not an instance of the built-in Group type (program ${sha(r.program).slice(0, 12)}…, expected ${sha(canonical).slice(0, 12)}…). ${why} Pass --force to bundle it anyway.`
+  )
+}
+
 const args = cborToJs(r.manifest.args) as { name?: unknown; purpose?: unknown; members?: unknown }
 const members = Array.isArray(args.members) ? (args.members as { role?: string; name?: string }[]) : []
 
