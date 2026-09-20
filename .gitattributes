@@ -1,0 +1,22 @@
+# Line endings are part of a type's IDENTITY here, so they are not left to each
+# machine's git settings.
+#
+# A letter names its program by the sha256 of its bytes, and the built-in types
+# are samples/*.html embedded at build time. With no rule, a Windows checkout
+# (core.autocrlf=true -- the default there, and on GitHub's Windows runners)
+# turns every LF into CRLF: the app still works, but its "Memo" is a different
+# type from the Memo built on Linux or macOS, under a different hash. The
+# welcome forum's roster was very nearly published as an instance of a Group
+# type that exists only in CRLF builds.
+#
+# So: every text file is LF in the working tree, on every platform.
+* text=auto eol=lf
+
+# Signed bundles and images are bytes. Never let git "fix" them.
+*.thing binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.icns binary
+*.webp binary
