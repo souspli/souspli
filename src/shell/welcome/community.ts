@@ -15,8 +15,10 @@ import forumB64 from './forum.thing.b64?raw'
 //     a real, living key, because a forum needs someone who can name moderators
 //     and admit members. That is the opposite of the welcome LETTER, whose key
 //     was thrown away on purpose. So the forum letter is made by its keeper in
-//     the app and dropped in here (forum.thing.b64); until it is, this file is
-//     empty and the offer is the relay alone.
+//     the app and dropped in here (forum.thing.b64) by `pnpm welcome:forum`,
+//     which checks it; an empty file means no forum, and the offer is then the
+//     relay alone. test/unit/welcome-forum.test.ts holds whatever is bundled to
+//     the same terms, and pins its hash -- the forum's permanent identity.
 //
 // Like the welcome letter, the forum is ordinary bytes handed to the ordinary
 // admission gate. Bundled is not trusted.
