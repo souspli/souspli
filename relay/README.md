@@ -76,11 +76,30 @@ pnpm world relay --from alan --to grace --relay ws://127.0.0.1:8797   # in the r
 credentials leave your browser):
 
 1. **Workers & Pages → Create → Workers → Import a repository** → `souspli/souspli`.
-2. Project name `souspli-relay`. **Root directory `relay`**. Build command: *(none)*.
-   Deploy command: `npx wrangler deploy`.
-3. Save and deploy. The first deploy creates the Durable Object (migration `v1`) and,
+2. Name the Worker **`souspli-relay`** — the `name` in `wrangler.jsonc`. (A different
+   name works, but the dashboard will warn until the two agree, and offers a PR to
+   sync them.)
+3. Build settings:
+
+   | | |
+   |---|---|
+   | Root directory | `relay` (no leading slash) |
+   | Build command | *(empty)* |
+   | Deploy command | `npm ci && npx wrangler deploy` |
+   | Build variable | `SKIP_DEPENDENCY_INSTALL` = `1` |
+
+   The variable matters. This package is npm, but it lives in a repository whose
+   root is a **pnpm** project, so Cloudflare's automatic step runs `pnpm install`
+   here, walks up to the root `pnpm-workspace.yaml` — which pnpm 11 uses for
+   settings only — and fails with *"packages field missing or empty"*. Skipping the
+   automatic install and running `npm ci` ourselves avoids that, and guarantees the
+   desktop app's dependencies are never installed to deploy a relay.
+4. Save and deploy. The first deploy creates the Durable Object (migration `v1`) and,
    because `wrangler.jsonc` declares `relay.souspli.org` as a custom domain on a zone
    this account already holds, the DNS record and certificate too.
+
+The directory must exist on the branch Cloudflare builds (`master`): *"root directory
+not found"* means it is building a commit from before `relay/` was merged.
 
 After that every push to `master` that touches `relay/` redeploys it.
 
