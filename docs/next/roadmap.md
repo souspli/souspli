@@ -12,7 +12,7 @@ Nothing here is a promise or has a date.
 |---|---|
 | **Writing sealed letters** | The format, the cryptography and the receiving side are done and tested. What is missing is the interface: choosing recipients, and saying plainly at the moment of sealing that *any recipient can forward it*. Until then Souspli has no private mode. |
 | **Signed installers and auto-update** | Nobody should have to click through an OS warning, or check a web page for security fixes. |
-| **Somewhere to go** | A new install now opens onto a welcome letter, but then there is nobody to talk to. A welcome forum and a suggested relay — *offered*, with the usual disclosure, never connected silently. |
+| **Forums per subscription** | The app asks a relay for *every* letter posted there. On a busy public relay that is too much: subscribe per forum, and let people choose which. |
 | **Key rotation and revocation** | The largest gap in the design. Likely a signed, chained statement from the old key naming its successor, discoverable the same way new versions are. |
 | **Recovery and custody** | A recovery phrase for an existing key; OS-backed signing by default; a hardware-wallet signer (`personal_sign` already works on Ledger and Trezor). |
 | **More ways to sign** | `ssh-ed25519`, as the specification describes — millions of developers already hold a key. Then Nostr-native signing of letters. |

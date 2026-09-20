@@ -48,6 +48,8 @@ interface ShellApi {
     since: number
   }>
   addRelay(url: string): Promise<Record<string, unknown>>
+  community(): Promise<CommunityState>
+  joinCommunity(): Promise<CommunityState & { error?: string }>
   removeRelay(url: string): Promise<Record<string, unknown>>
   postToRelays(envelopeHash: string): Promise<Record<string, unknown>>
   relayArrivals(envelopeHash: string): Promise<{ relayUrl: string; poster: string; selfPosted: boolean; at: number }[]>
@@ -108,6 +110,15 @@ interface ShellApi {
   respondConfirm(id: number, approved: boolean): void
   onPublishResult(cb: (outcome: Record<string, unknown>) => void): void
 }
+/** What the project suggests, and how much of it this install already has. */
+interface CommunityState {
+  relay: string
+  relayAdded: boolean
+  forumAvailable: boolean
+  forumHeld: boolean
+  forumHash: string | null
+}
+
 interface ThingRow {
   envelopeHash: string
   authorScheme: string
@@ -1793,6 +1804,7 @@ function openRelaysModal(): void {
       const none = el('p', 'sh-hint', 'No relays. Nothing is being sent or received over one.')
       none.setAttribute('data-testid', 'relay-empty')
       list.append(none)
+      appendCommunityOffer(list, 'The project runs one:')
       return
     }
     for (const r of state.relays) {
@@ -2298,6 +2310,7 @@ async function openForumsModal(): Promise<void> {
       const none = el('p', 'sh-hint', 'No groups in your library yet. Make one with New → Group.')
       none.setAttribute('data-testid', 'forums-empty')
       list.append(none)
+      appendCommunityOffer(list, 'Or start with the project’s own:')
       return
     }
     for (const f of forums) {
@@ -2724,6 +2737,78 @@ function voteControl(envelopeHash: string, facts: NonNullable<HeaderFacts['votes
 }
 
 // ── Per-thing trust header ───────────────────────────────────────────────────
+/** "Join the Souspli forum": the one place the app proposes talking to a
+ *  server of its own accord -- so it proposes, and nothing more. Opening this
+ *  dialog contacts nobody. It says what would be added and EXACTLY what that
+ *  tells whom, in the words the Relays window uses, and acts only on the press.
+ *  The relay list starting empty is a promise; this is how it stays one. */
+async function openCommunityModal(): Promise<void> {
+  const state = await shell.community()
+  const overlay = el('div', 'evm-modal-overlay')
+  const modal = el('div', 'evm-modal')
+  modal.setAttribute('data-testid', 'community-modal')
+  const header = el('div', 'evm-modal-header')
+  header.append(el('span', 'evm-modal-title', state.forumAvailable ? 'Join the Souspli forum' : 'Add the Souspli relay'))
+  const body = el('div', 'evm-modal-body')
+  const host = state.relay.replace(/^wss?:\/\//, '')
+  body.append(
+    el(
+      'p',
+      undefined,
+      state.forumAvailable
+        ? 'Souspli is more use with people in it. The project runs a small relay, and a forum on it where you can ask questions, show what you have made, and find others to exchange letters with.'
+        : 'Souspli is more use with people in it. The project runs a small relay: a place letters can reach you from people who have never been handed your address.'
+    ),
+    el('p', 'sh-hint', 'Saying yes does this, and only this:')
+  )
+  const does = el('ul', 'sh-community-list')
+  does.append(el('li', undefined, `Adds ${state.relay} to your relays, and subscribes to the letters posted there.`))
+  if (state.forumAvailable) does.append(el('li', undefined, 'Adds the forum’s roster — an ordinary signed letter, checked like any other — to your library, so File → Forums lists it.'))
+  body.append(does, el('p', 'sh-hint', 'What it costs you:'))
+  const costs = el('ul', 'sh-community-list')
+  costs.append(
+    el('li', undefined, `${host} learns your IP address, and that you are interested in what is posted there. It is run by the Souspli project on Cloudflare.`),
+    el('li', undefined, 'Letters anyone posts there will arrive in your feed. Each is verified before it is shown, and a relay can never make one look like someone else wrote it — but strangers can reach you.'),
+    el('li', undefined, 'Nothing of yours is sent. Posting stays a separate act, letter by letter, from Share…')
+  )
+  body.append(costs, el('p', 'sh-hint', 'You can remove it again at any time under File → Relays.'))
+  const footer = el('div', 'evm-modal-footer')
+  const cancel = el('button', 'evm-btn evm-btn--ghost', 'Not now')
+  cancel.addEventListener('click', () => overlay.remove())
+  const yes = el('button', 'evm-btn evm-btn--primary', state.forumAvailable ? 'Join' : 'Add the relay') as HTMLButtonElement
+  yes.setAttribute('data-testid', 'community-join')
+  yes.addEventListener('click', async () => {
+    yes.disabled = true
+    const r = await shell.joinCommunity()
+    overlay.remove()
+    if (r.error) return showText(`Could not add the relay: ${r.error}`, 'danger')
+    showText(r.forumHash ? 'Joined. The forum is under File → Forums.' : `Added ${host}.`, 'success')
+    await refreshFeed()
+    if (!selected) renderHeader(null) // the offer in the empty state is spent
+    if (r.forumHash) void openForumModal(r.forumHash)
+  })
+  footer.append(cancel, yes)
+  modal.append(header, body, footer)
+  overlay.append(modal)
+  document.body.append(trackOverlay(overlay))
+}
+
+/** A one-line offer for an empty list, shown only while there is something
+ *  left to offer. Filled in after the list renders; asks main, contacts nobody. */
+function appendCommunityOffer(into: HTMLElement, lead: string): void {
+  void shell.community().then((c) => {
+    if (c.relayAdded && (!c.forumAvailable || c.forumHeld)) return
+    if (!into.isConnected) return
+    const line = el('p', 'sh-hint sh-community-offer')
+    line.setAttribute('data-testid', 'community-offer')
+    const go = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', c.forumAvailable ? 'Join the Souspli forum…' : 'Add the Souspli relay…')
+    go.setAttribute('data-testid', 'community-open')
+    go.addEventListener('click', () => void openCommunityModal())
+    line.append(el('span', undefined, lead + ' '), go)
+    into.append(line)
+  })
+}
+
 /** What fills the content area while no letter is open. It used to be nothing:
  *  a new install was a black rectangle under "Select a letter from the feed."
  *  The native cage view is only attached while something is mounted, so this
@@ -2750,6 +2835,15 @@ function renderWelcomePane(show: boolean): void {
   open.setAttribute('data-testid', 'welcome-open')
   open.addEventListener('click', () => fileInput.click())
   actions.append(write, open)
+  // The third way in: people. Present only while there is an offer to make.
+  void shell.community().then((c) => {
+    if (c.relayAdded && (!c.forumAvailable || c.forumHeld)) return
+    if (!actions.isConnected) return
+    const people = el('button', 'evm-btn evm-btn--secondary', 'Find people…') as HTMLButtonElement
+    people.setAttribute('data-testid', 'welcome-people')
+    people.addEventListener('click', () => void openCommunityModal())
+    actions.append(people)
+  })
   pane.append(
     actions,
     el(

@@ -688,3 +688,13 @@ body {
 }
 .sh-more-row > button { justify-self: start; white-space: nowrap; }
 .sh-more-modal .evm-copyfield { margin-top: var(--evm-space-3); }
+
+/* The community offer and its dialog. */
+.sh-community-list {
+  margin: 0 0 var(--evm-space-3);
+  padding-left: 1.2em;
+  font-size: var(--evm-text-sm);
+  line-height: 1.55;
+}
+.sh-community-list li { margin: var(--evm-space-1) 0; }
+.sh-community-offer { margin-top: var(--evm-space-3); display: flex; align-items: center; gap: var(--evm-space-2); flex-wrap: wrap; }

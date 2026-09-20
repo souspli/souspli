@@ -1,0 +1,26 @@
+// relay.souspli.org — see README.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "souspli-relay",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  // The custom domain: Cloudflare creates the DNS record and the certificate.
+  // The zone is already on this account, so nothing else is needed.
+  "routes": [{ "pattern": "relay.souspli.org", "custom_domain": true }],
+  "durable_objects": {
+    "bindings": [{ "name": "RELAY", "class_name": "Relay" }]
+  },
+  // SQLite-backed Durable Objects are the kind available on the free plan.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }],
+  "vars": {
+    // Everything the operator might want to turn, without touching code.
+    "MAX_EVENTS": "50000",          // oldest are dropped past this
+    "MAX_CONTENT_BYTES": "45056",   // base64 of the app's 32 KiB inline cap, with headroom
+    "EVENTS_PER_PUBKEY_PER_HOUR": "60",
+    "EVENTS_PER_IP_PER_HOUR": "120",
+    "BLOCKED_PUBKEYS": ""           // comma-separated hex x-only keys
+  },
+  // Off on purpose: request logs would record who connected and from where, and
+  // the relay deliberately keeps neither.
+  "observability": { "enabled": false }
+}

@@ -85,6 +85,14 @@ Therefore:
 An offer can be voted on and ranked like any letter — a vote points at a hash
 whether or not you hold it.
 
+## A relay for it
+
+Any NIP-01 relay that stores regular-range kinds will carry these events. The
+project's own, [`relay/`](../../../relay/README.md), carries nothing else: it checks
+the event's shape and signature, bounds size and rate, sends stored events oldest
+first so a cursor-following reader never skips one, and never looks inside the
+letter.
+
 ## Bounds
 
 Relay input is as hostile as a bundle from a stranger: events are rate-limited per

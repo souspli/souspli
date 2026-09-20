@@ -27,6 +27,7 @@ what you clicked.
 | Paste a `magnet:` link | The BitTorrent DHT and every peer learn **your IP** and that you want this letter. Shown as `⚠ contacts the BitTorrent network` first. |
 | **Seed over BitTorrent** | The DHT and peers learn your IP and that **you hold this letter** — even a sealed one, whose content stays secret. |
 | Add a relay | That relay learns your IP and **what you subscribe to** — the one thing none of the other channels leak. |
+| Say yes to **Find people…** | Exactly the row above, for `relay.souspli.org`, plus the welcome forum's roster is added to your library from inside the app — no fetch. Until you say yes: nothing. The offer itself contacts nobody. |
 | **Post to relays** | Each relay learns your IP; the relay and all its readers learn that **your key published this letter**. |
 | Press **Fetch** on an offer | Whatever the offer's link type reveals (above). Until you press it, nothing: no tracker contacted, no byte pulled. |
 | Give a key a petname | Nobody. It never leaves your machine. |
@@ -35,7 +36,8 @@ what you clicked.
 
 ## Defaults
 
-- The relay list starts **empty**. Souspli connects to nothing you did not add.
+- The relay list starts **empty**. Souspli connects to nothing you did not add. It
+  *suggests* the project's relay; a suggestion opens no connection.
 - Nothing is seeded because it exists. Seeding is switched on per letter.
 - Nothing is posted because you wrote it. Posting is a separate, explicit act each
   time.

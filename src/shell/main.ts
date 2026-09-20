@@ -19,6 +19,7 @@ import {
 } from './library/index.js'
 import { STARTERS, starterByKey, starterBytes } from './starters/index.js'
 import { WELCOME_FLAG, welcomeBundle } from './welcome/index.js'
+import { suggestedRelay, welcomeForumBundle } from './welcome/community.js'
 import { applyPins, pinsOf, type Pins } from './library/pins.js'
 import { mountThing, type MountedThing } from './mount/index.js'
 import { TransportService, FileTransport, HttpTransport, SeedTransport } from './transport/index.js'
@@ -2608,6 +2609,49 @@ app.whenReady().then(async () => {
     return { added: url, relays: nostr.status() }
   }
 
+  // ── The suggested community ────────────────────────────────────────────────
+  // What the chrome needs in order to OFFER the project's relay and welcome
+  // forum, and the one call that acts on a yes. Nothing in here runs on its
+  // own: the relay list starts empty and stays empty until a person, having
+  // read what it costs, asks for this.
+
+  /** Whether there is anything left to offer, and what. */
+  function communityState(): Record<string, unknown> {
+    const relay = suggestedRelay()
+    const forum = welcomeForumBundle()
+    let forumHash: string | null = null
+    if (forum) {
+      try {
+        const r = admitBundle(parseBundle(forum))
+        if (r.status === 'valid') forumHash = hex(r.envelopeHash)
+      } catch {
+        /* a broken bundled forum is simply not offered */
+      }
+    }
+    return {
+      relay,
+      relayAdded: library.relays().includes(relay),
+      forumAvailable: forumHash !== null,
+      forumHeld: forumHash !== null && library.get(forumHash) !== null,
+      forumHash
+    }
+  }
+
+  /** The human said yes. Adds the relay exactly as typing it into the Relays
+   *  window would, and admits the forum letter through the ordinary gate. */
+  async function joinCommunity(): Promise<Record<string, unknown>> {
+    const added = addRelay(suggestedRelay())
+    if (added.error) return added
+    let forumHash: string | null = null
+    const forum = welcomeForumBundle()
+    if (forum) {
+      const outcome = await ingestBytes(forum)
+      if (outcome.status === 'valid' && typeof outcome.envelopeHash === 'string') forumHash = outcome.envelopeHash
+      else record({ type: 'welcome-rejected', reason: `forum: ${String(outcome.reason ?? outcome.status)}` })
+    }
+    return { ...communityState(), joined: true, forumHash }
+  }
+
   function removeRelay(input: unknown): Record<string, unknown> {
     const url = typeof input === 'string' ? input.trim() : ''
     const removed = library.removeRelay(url)
@@ -3140,6 +3184,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('shell:offers', (_e, g: unknown) => offerList(g))
   ipcMain.handle('shell:fetch-offer', async (_e, h: unknown) => await fetchOffer(h))
   ipcMain.handle('shell:relays', () => relayState())
+  ipcMain.handle('shell:community', () => communityState())
+  ipcMain.handle('shell:community-join', () => joinCommunity())
   ipcMain.handle('shell:relay-add', (_e, url: unknown) => addRelay(url))
   ipcMain.handle('shell:relay-remove', (_e, url: unknown) => removeRelay(url))
   ipcMain.handle('shell:relay-post', async (_e, h: unknown) => await postToRelays(h))

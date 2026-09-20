@@ -16,6 +16,14 @@ there is no admin panel. It is a handful of letter types that point at each othe
 Every one of those is an ordinary signed letter that travels like any other. A forum
 "exists" wherever people hold its letters.
 
+## Find one
+
+With nothing open, press **Find people…** (or open **File → Forums…** while it is
+empty). Souspli offers the project's own relay and welcome forum, tells you what
+joining reveals — the relay learns your IP address and that you are listening, and
+strangers' letters will reach your feed — and does nothing until you agree. After
+that the forum is listed under **File → Forums…** like any other.
+
 ## Start one
 
 1. **New → Group.** Give it a name and a purpose. Add members: each is a key, a
