@@ -310,7 +310,7 @@ Sealed = {
   1: uint,          # v — MUST be 1
   2: [Slot],        # slots — one per recipient, ORDER RANDOMIZED
   3: bytes(24),     # nonce
-  4: bytes          # ct — XChaCha20-Poly1305(CK, nonce, canonical_cbor(Envelope) || padding)
+  4: bytes          # ct — XChaCha20-Poly1305(CK, nonce, nip44_pad(canonical_cbor(Envelope)))
 }
 
 Slot = {
@@ -332,8 +332,21 @@ base64 would be redundant. Implementations MUST NOT base64-encode `wrap`.
   publishing the guest list — a sealed invite that names its recipients leaks the
   social graph to anyone who holds it.
 - Slot order MUST be randomized. Otherwise position leaks who was invited first.
-- `ct` MUST be padded to a size bucket (reuse NIP-44's padding scheme) so that
-  ciphertext length does not fingerprint the content.
+- The plaintext of `ct` MUST be the envelope under **NIP-44 v2's padding**, the
+  same scheme the slot wraps already use — one padding rule for the whole format:
+
+  ```
+  padded  = u16be(len(envelope)) || envelope || zeros
+  len(padded) = 2 + calc_padded_len(len(envelope))
+  ```
+
+  where `calc_padded_len` is NIP-44's (32 for ≤ 32 bytes; otherwise the next
+  multiple of a chunk that is 32 up to 256 bytes and one-eighth of the next power
+  of two above that). An envelope MUST be 1–65535 bytes. Decoders MUST reject a
+  plaintext whose length is not exactly `2 + calc_padded_len(prefix)` or whose
+  prefix exceeds what is present, and MUST distinguish that from an AEAD failure:
+  the first is a sealer using some other padding rule, the second is tampering.
+  The reason is unchanged — ciphertext length must not fingerprint the envelope.
 
 **Re-invitation falls out.** Anyone who can decrypt `CK` can build a new `Sealed`
 with a new slot for Carol. Alice's inner signature survives, so Carol sees the
@@ -572,13 +585,7 @@ should absorb; none is a workaround in the code. Background:
    `..` or control characters. The spec should either constrain keys identically or
    state that shells MAY refuse manifests whose names they cannot serve — silent
    per-shell divergence would be an interop trap.
-4. **§7 — padding of `ct` is underspecified, and the implementation differs.** §7
-   says to "reuse NIP-44's padding scheme". The reference implementation instead
-   prefixes the envelope with a 2-byte big-endian length and pads to the next
-   256-byte bucket. Sealed *members* (§7.1) are unpadded, as §7.1 is written. The
-   sealed conformance vector encodes the implemented behaviour; the two must be
-   reconciled — in either direction — before anyone else implements sealing.
-5. **§10.5 is resolved in the implementation:** the slot count is capped at 512
+4. **§10.5 is resolved in the implementation:** the slot count is capped at 512
    before any cryptography runs.
 
 ## 13. Reference implementation status
@@ -588,6 +595,6 @@ should absorb; none is a workaround in the code. Background:
 | §6 `eth-eip191` | Sign and verify. The only scheme the Souspli app signs letters with. |
 | §6 `nostr-schnorr` | Verify. The app uses this key for relay events and unsealing, not for signing letters. |
 | §6 `ssh-ed25519` | **Not implemented** — an envelope using it is `unverifiable`. |
-| §7 sealing | `seal` / `unseal` implemented and covered by conformance vectors. The app can open sealed bundles; it cannot yet author them. |
+| §7 sealing | `seal` / `unseal` implemented and covered by conformance vectors, including the padding rule above (`sealed.json` was regenerated when the implementation was brought into line with it on 2026-09-23; nothing sealed under the earlier draft existed outside tests). The app can open sealed bundles; it cannot yet author them. |
 | §5.3 chaining | Implemented; forks are flagged. `path` is set to the root envelope's hash when a letter is first amended. |
 | §11 vectors | 41 vectors in 7 categories, committed under `src/conformance/vectors/`. |

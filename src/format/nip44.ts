@@ -44,15 +44,20 @@ function messageKeys(convKey: Uint8Array, nonce: Uint8Array): {
 }
 
 /** NIP-44 padding: prefix with 2-byte big-endian length, pad to a size bucket
- *  so ciphertext length does not fingerprint the plaintext length. */
-function calcPaddedLen(unpadded: number): number {
+ *  so ciphertext length does not fingerprint the plaintext length.
+ *
+ *  Exported because the format spec (§7) says a sealed envelope's `ct` reuses
+ *  THIS scheme -- one padding rule for the whole format, not a second one that
+ *  happens to look similar. `nip44Unpad` is strict: a plaintext whose bucket
+ *  does not match its length is refused, never silently accepted. */
+export function calcPaddedLen(unpadded: number): number {
   if (unpadded <= 32) return 32
   const nextPower = 1 << (Math.floor(Math.log2(unpadded - 1)) + 1)
   const chunk = nextPower <= 256 ? 32 : nextPower / 8
   return chunk * (Math.floor((unpadded - 1) / chunk) + 1)
 }
 
-function pad(plaintext: Uint8Array): Uint8Array {
+export function nip44Pad(plaintext: Uint8Array): Uint8Array {
   const len = plaintext.length
   if (len < 1 || len > 0xffff) throw new Nip44Error('plaintext length out of range')
   const padded = calcPaddedLen(len)
@@ -63,7 +68,7 @@ function pad(plaintext: Uint8Array): Uint8Array {
   return out
 }
 
-function unpad(padded: Uint8Array): Uint8Array {
+export function nip44Unpad(padded: Uint8Array): Uint8Array {
   if (padded.length < 2) throw new Nip44Error('padded too short')
   const len = (padded[0]! << 8) | padded[1]!
   const content = padded.subarray(2, 2 + len)
@@ -92,7 +97,7 @@ export function encrypt(plaintext: Uint8Array, convKey: Uint8Array, nonce?: Uint
   const n = nonce ?? randomBytes(32)
   if (n.length !== 32) throw new Nip44Error('nonce must be 32 bytes')
   const { chachaKey, chachaNonce, hmacKey } = messageKeys(convKey, n)
-  const ciphertext = chacha20(chachaKey, chachaNonce, pad(plaintext))
+  const ciphertext = chacha20(chachaKey, chachaNonce, nip44Pad(plaintext))
   const mac = hmacAad(hmacKey, n, ciphertext)
   const out = new Uint8Array(1 + 32 + ciphertext.length + 32)
   out[0] = VERSION
@@ -114,5 +119,5 @@ export function decrypt(payload: Uint8Array, convKey: Uint8Array): Uint8Array {
   const expectedMac = hmacAad(hmacKey, nonce, ciphertext)
   if (!constantTimeEqual(mac, expectedMac)) throw new Nip44Error('MAC mismatch')
   const padded = chacha20(chachaKey, chachaNonce, ciphertext)
-  return unpad(padded)
+  return nip44Unpad(padded)
 }

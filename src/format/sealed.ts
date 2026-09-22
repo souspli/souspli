@@ -3,7 +3,7 @@ import { secp256k1, schnorr } from '@noble/curves/secp256k1.js'
 import { randomBytes } from '@noble/hashes/utils.js'
 import { decodeCanonical, encode, type CborMap, type CborValue, type CborKey } from './cbor.js'
 import { DEFAULT_LIMITS, MAX_SEALED_SLOTS, type DecodeLimits } from './limits.js'
-import { conversationKey, encrypt as nip44Encrypt, decrypt as nip44Decrypt } from './nip44.js'
+import { conversationKey, encrypt as nip44Encrypt, decrypt as nip44Decrypt, nip44Pad, nip44Unpad } from './nip44.js'
 
 // ── Sealed envelopes — format spec §7 ────────────────────────────────────────
 //
@@ -20,28 +20,26 @@ export class SealedError extends Error {
   override name = 'SealedError'
 }
 
-const OUTER_PAD_PREFIX = 2
-
-/** NIP-44-style length-prefixed padding for the inner envelope, so ciphertext
- *  length does not fingerprint the envelope. (Same scheme as §7's note.) */
+/** §7: `ct` is the envelope padded with NIP-44's scheme -- a 2-byte length,
+ *  then the bytes, then zeros to `calc_padded_len` -- so ciphertext length does
+ *  not fingerprint the envelope. The SAME scheme as the slot wraps, not a second
+ *  one: an earlier draft of this file padded to 256-byte buckets instead, which
+ *  worked but was a private dialect that no other implementation of the spec
+ *  would produce or accept. Unpadding is strict (see nip44Unpad). */
 function padOuter(bytes: Uint8Array): Uint8Array {
-  if (bytes.length > 0xffff) throw new SealedError('envelope too large to seal')
-  // Pad up to the next 256-byte bucket (small envelopes → uniform size).
-  const bucket = 256
-  const total = Math.max(bucket, Math.ceil((bytes.length + OUTER_PAD_PREFIX) / bucket) * bucket)
-  const out = new Uint8Array(total)
-  out[0] = (bytes.length >> 8) & 0xff
-  out[1] = bytes.length & 0xff
-  out.set(bytes, OUTER_PAD_PREFIX)
-  return out
+  try {
+    return nip44Pad(bytes)
+  } catch (e) {
+    throw new SealedError(`envelope cannot be padded: ${(e as Error).message}`)
+  }
 }
 
 function unpadOuter(padded: Uint8Array): Uint8Array {
-  if (padded.length < OUTER_PAD_PREFIX) throw new SealedError('padded plaintext too short')
-  const len = (padded[0]! << 8) | padded[1]!
-  const content = padded.subarray(OUTER_PAD_PREFIX, OUTER_PAD_PREFIX + len)
-  if (content.length !== len) throw new SealedError('invalid inner padding')
-  return content
+  try {
+    return nip44Unpad(padded)
+  } catch (e) {
+    throw new SealedError(`invalid inner padding: ${(e as Error).message}`)
+  }
 }
 
 /** Is this byte sequence a Sealed envelope (v=1, has slots)? Cheap structural
@@ -145,14 +143,19 @@ export function unsealFull(
   for (const slot of slots) {
     const ck = unsealer.unwrap(slot.epk, slot.wrap)
     if (!ck || ck.length !== 32) continue
+    let padded: Uint8Array
     try {
-      const padded = xchacha20poly1305(ck, nonce).decrypt(ct)
-      return { envelope: unpadOuter(padded), ck }
+      padded = xchacha20poly1305(ck, nonce).decrypt(ct)
     } catch {
       // CK unwrapped but the outer AEAD failed — corrupt sealed blob. A wrong
       // slot would have failed at unwrap above, so this is tampering.
       throw new SealedError('sealed: content key valid but outer decrypt failed (tampered)')
     }
+    // Outside the try: an AEAD that verifies and a padding that does not are
+    // different findings. The first is a tampered blob; the second is a sealer
+    // that used some other padding rule, which is an interop bug to report as
+    // such rather than as tampering.
+    return { envelope: unpadOuter(padded), ck }
   }
   return 'not-for-me'
 }

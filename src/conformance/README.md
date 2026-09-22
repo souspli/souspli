@@ -54,7 +54,10 @@ ECDSA, zero-aux-rand BIP-340 Schnorr — so regeneration is byte-identical and a
 diff is a real behavioural change worth reviewing. The sealed set uses fresh
 random content keys / nonces / ephemeral keys (as production sealing must), so it
 is generated once and **frozen**; the runner verifies the frozen bytes, which is
-deterministic regardless. `generate.ts` is the only file here that holds private
+deterministic regardless. It has been regenerated once, on 2026-09-23, when the
+outer padding of `ct` was brought into line with spec §7 (NIP-44's scheme in place
+of a private 256-byte bucket); a vector sealed under the earlier draft is refused
+by the current decoder, on purpose. `generate.ts` is the only file here that holds private
 keys or signs — the shipped runner only ever *verifies*.
 
 ## The vectors
