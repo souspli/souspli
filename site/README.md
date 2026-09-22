@@ -71,6 +71,13 @@ xvfb-run -a -s "-screen 0 1920x1200x24" node tools/screenshot/capture.mjs
 It is the one image on the site: lazy-loaded, sized in the markup so nothing shifts,
 and below the first screen so the page still paints from its first round trip.
 
+## The talk
+
+`/talk/` is the conference deck (`talk/`, with its design source and handoff notes;
+the compiled single file is `public/talk/index.html`). It is the one page that runs
+JavaScript — its own, inlined — so the gate and the CSP make an exception for that
+path alone. It still loads nothing from another origin.
+
 ## Deploying (Cloudflare Pages)
 
 | Setting | Value |

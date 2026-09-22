@@ -7,3 +7,9 @@
 
 /img/*
   Cache-Control: public, max-age=86400
+
+# The talk is the one page that runs script: its own, inlined, with its fonts
+# inlined as data: URIs. Still nothing from another origin.
+/talk/*
+  ! Content-Security-Policy
+  Content-Security-Policy: default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' blob:; style-src 'unsafe-inline' blob:; font-src data: blob:; img-src 'self' data: blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'

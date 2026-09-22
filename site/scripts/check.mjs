@@ -11,7 +11,11 @@ const dist = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '_dis
 // ~10 TCP segments: what a server may send before the first ACK comes back.
 const BUDGET = 14 * 1024
 // Reference documents that are long by nature. Everything else must fit.
-const OVER_BUDGET_OK = new Set(['/how/protocol/spec/'])
+const OVER_BUDGET_OK = new Set(['/how/protocol/spec/', '/talk/'])
+// The talk is a keyboard-driven slide deck: it IS JavaScript, and it inlines its
+// fonts and runtime into one file. The one thing it may not do is what nothing
+// here may do -- reach another origin -- and that rule still applies to it.
+const SCRIPT_OK = new Set(['/talk/'])
 
 function* walk(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -29,10 +33,10 @@ for (const file of walk(dist)) {
   const html = fs.readFileSync(file, 'utf8')
   // Code samples legitimately mention <script>; they are escaped, so a literal
   // tag here is a real one.
-  if (/<script\b/i.test(html)) problems.push(`${url}: contains a <script> tag`)
+  if (!SCRIPT_OK.has(url) && /<script\b/i.test(html)) problems.push(`${url}: contains a <script> tag`)
   // Prose ABOUT the web quotes url(…) and @import; only look outside code.
   const prose = html.replace(/<pre[\s\S]*?<\/pre>/g, '').replace(/<code[\s\S]*?<\/code>/g, '')
-  if (/\son[a-z]+\s*=\s*["']/i.test(prose)) problems.push(`${url}: inline event handler`)
+  if (!SCRIPT_OK.has(url) && /\son[a-z]+\s*=\s*["']/i.test(prose)) problems.push(`${url}: inline event handler`)
   // Anything the browser would FETCH must be same-origin or inline. Plain <a>
   // links elsewhere are fine: following one is the reader's decision.
   for (const m of html.matchAll(/<(img|link|source|video|audio|iframe|embed|object)\b[^>]*?\s(?:src|href|data|poster)="([^"]+)"/gi)) {
