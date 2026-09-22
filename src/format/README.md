@@ -28,10 +28,6 @@ about this). Tests: `test/format/`.
 
 Also tracked in the spec's own *Pending amendments* section.
 
-- **Outer `ct` padding.** §7 says "reuse NIP-44's padding scheme"; `sealed.ts`
-  pads the inner envelope to a 256-byte bucket instead of NIP-44's
-  `calc_padded_len`. Sealed bundle *members* (§7.1) are unpadded (`nonce||ct`),
-  matching §7.1 as written. Reconcile the envelope padding before interop.
 - **`ssh-ed25519`** verification is unimplemented (the scheme is a documented
   registry slot → `unverifiable`).
 
