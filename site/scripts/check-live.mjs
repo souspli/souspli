@@ -11,7 +11,8 @@
 // the untouched file), so this asks the way a browser does.
 const BASE = process.env.SITE_URL ?? 'https://souspli.org'
 const BUDGET = 14 * 1024
-const OVER_BUDGET_OK = new Set(['/how/protocol/spec/'])
+const OVER_BUDGET_OK = new Set(['/how/protocol/spec/', '/talk/'])
+const SCRIPT_OK = new Set(['/talk/']) // the slide deck; see check.mjs
 const CF_BEACON = /\ssrc=["']https:\/\/static\.cloudflareinsights\.com\/beacon\.min\.js/
 const NAV = {
   accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -41,7 +42,7 @@ while (queue.length) {
   if (!/default-src 'none'/.test(csp)) problems.push(`${url}: Content-Security-Policy missing or weakened`)
   if (res.headers.get('set-cookie')) problems.push(`${url}: sets a cookie`)
   for (const m of html.matchAll(/<script\b[^>]*>/gi)) {
-    if (CF_BEACON.test(m[0])) continue
+    if (CF_BEACON.test(m[0]) || SCRIPT_OK.has(url)) continue
     problems.push(`${url}: served with ${m[0].slice(0, 120)}`)
   }
   if (/cdn-cgi\/|__cf_email__/i.test(html)) problems.push(`${url}: edge rewrite present (cdn-cgi / email obfuscation)`)

@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="_ds/organic-596a4247-a937-4404-809f-a1c00619bba4/styles.css" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Caprasimo&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="_ds/organic-596a4247-a937-4404-809f-a1c00619bba4/_ds_bundle.js"></script>
+<title>Souspli — Letters, not servers</title>
+<style>
+deck-stage {
+  --type-display: 120px; --type-title: 64px; --type-subtitle: 40px;
+  --type-body: 34px; --type-small: 28px; --type-kicker: 24px;
+  --pad-x: 132px; --pad-top: 96px; --pad-bottom: 96px;
+}
+.slide {
+  display: flex; flex-direction: column;
+  background: var(--color-bg); color: var(--color-text);
+  font-family: var(--font-body); text-wrap: pretty;
+  padding: var(--pad-top) var(--pad-x) var(--pad-bottom);
+  print-color-adjust: exact; -webkit-print-color-adjust: exact;
+}
+.slide-title { font-family: var(--font-heading); font-weight: 400; font-size: var(--type-title); line-height: 1.14; margin: 0 0 46px; }
+.display { font-family: var(--font-heading); font-weight: 400; font-size: var(--type-display); line-height: 1.05; margin: 0; }
+.lede { font-size: var(--type-subtitle); line-height: 1.4; margin: 0; max-width: 30ch; }
+.meta { font-size: var(--type-kicker); color: color-mix(in srgb, var(--color-text) 55%, transparent); letter-spacing: 0.06em; }
+.caption { margin-top: auto; font-size: var(--type-small); color: var(--color-accent-700); max-width: 62ch; }
+
+.cover { justify-content: center; align-items: center; text-align: center; gap: 40px; background: var(--color-surface); }
+.divider { justify-content: center; align-items: center; text-align: center; background: var(--color-accent-2-800); color: var(--color-bg); overflow: hidden; gap: 30px; }
+.divider::before { content: ""; position: absolute; right: -300px; bottom: -400px; width: 1000px; height: 1000px; border-radius: 999px; background: var(--color-accent-2-700); }
+.divider > * { position: relative; }
+.divider .slide-title { margin: 0; }
+.divider .lede { max-width: 26ch; color: var(--color-accent-2-200); }
+
+/* — tier diagram — */
+.diagram { display: grid; grid-template-columns: 1fr 400px; gap: 40px; align-items: stretch; }
+.tiers { display: flex; flex-direction: column; }
+.tier { display: grid; grid-template-columns: 168px 1fr; gap: 26px; align-items: center;
+  background: var(--color-surface); border-radius: var(--radius-lg); padding: 20px 28px; }
+.tier-label { font-family: var(--font-heading); font-size: var(--type-small); color: var(--color-accent-700); line-height: 1.1; }
+.tier-body { display: flex; flex-direction: column; gap: 14px; }
+.boxes { display: flex; flex-wrap: wrap; gap: 14px; }
+.box { background: var(--color-bg); border-radius: var(--radius-md); padding: 12px 20px; font-size: var(--type-small); }
+.box.hot { background: var(--color-accent-200); color: var(--color-accent-900); }
+.roles { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.roles-label { font-size: var(--type-kicker); color: var(--color-accent-700); letter-spacing: 0.04em; }
+.role { border: 1px solid var(--color-accent-400); color: var(--color-accent-800); border-radius: 999px; padding: 6px 18px; font-size: var(--type-kicker); }
+.between { height: 30px; display: flex; align-items: center; justify-content: center; gap: 12px; }
+.between i { display: block; width: 0; height: 0; border-left: 9px solid transparent; border-right: 9px solid transparent; }
+.between i.up { border-bottom: 13px solid var(--color-accent-400); }
+.between i.dn { border-top: 13px solid var(--color-accent-400); }
+.thirdparty { border: 3px dashed var(--color-accent-400); border-radius: var(--radius-lg); padding: 24px 26px; display: flex; flex-direction: column; gap: 14px; }
+.thirdparty h3 { font-family: var(--font-heading); font-size: var(--type-small); margin: 0 0 4px; color: var(--color-accent-700); }
+.tp { background: var(--color-accent-100); border-radius: var(--radius-md); padding: 10px 18px; font-size: var(--type-kicker); }
+
+/* — four-up mini stacks — */
+.fourup { display: grid; grid-template-columns: 1fr 1fr; gap: 26px 34px; }
+.mini { background: var(--color-surface); border-radius: var(--radius-lg); padding: 20px 24px; display: flex; flex-direction: column; gap: 8px; }
+.mini h3 { font-family: var(--font-heading); font-weight: 400; font-size: var(--type-small); margin: 0 0 6px; }
+.band { display: flex; align-items: baseline; gap: 16px; line-height: 1.3; background: var(--color-bg); border-radius: 999px; padding: 8px 20px; font-size: var(--type-kicker); }
+.band b { font-family: var(--font-heading); font-weight: 400; color: var(--color-accent-700); flex: 0 0 124px; }
+.band span { flex: 1; }
+.band.hot { background: var(--color-accent-200); }
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 34px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 30px; }
+.card { background: var(--color-surface); border-radius: var(--radius-lg); padding: 32px 34px; font-size: var(--type-body); line-height: 1.35; }
+.card-kicker { font-family: var(--font-heading); font-size: var(--type-kicker); color: var(--color-accent-700); letter-spacing: 0.04em; margin: 0 0 14px; }
+
+.bullets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 34px; font-size: var(--type-body); line-height: 1.4; max-width: 30ch; }
+.bullets li { display: flex; gap: 22px; }
+.dot { flex: 0 0 auto; width: 16px; height: 16px; border-radius: 999px; background: var(--color-accent); margin-top: 16px; }
+
+.docmock { background: var(--color-neutral-100); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: 34px 38px; display: flex; flex-direction: column; gap: 18px; }
+.docmock .rule { height: 12px; border-radius: 999px; background: var(--color-neutral-300); }
+.docmock .rule.short { width: 55%; }
+.doc-head { font-family: var(--font-heading); font-weight: 400; font-size: var(--type-subtitle); line-height: 1.1; margin: 0; }
+.doc-sub { font-size: var(--type-kicker); color: var(--color-neutral-600); margin: 0; letter-spacing: 0.04em; }
+.sigline { display: flex; align-items: center; gap: 16px; font-size: var(--type-kicker); color: var(--color-accent-2-700); border-top: 1px solid var(--color-divider); padding-top: 18px; }
+.seal { width: 46px; height: 46px; border-radius: 999px; background: var(--color-accent-2-300); flex: 0 0 auto; }
+
+.numgrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 26px; }
+.numcard { background: var(--color-surface); border-radius: var(--radius-lg); padding: 30px 26px; display: flex; flex-direction: column; gap: 18px; }
+.numcard .n { width: 62px; height: 62px; border-radius: 999px; background: var(--color-accent); color: var(--color-bg); font-family: var(--font-heading); font-size: var(--type-small); display: flex; align-items: center; justify-content: center; }
+.numcard h3 { font-family: var(--font-heading); font-weight: 400; font-size: var(--type-small); margin: 0; line-height: 1.15; }
+.numcard p { font-size: var(--type-kicker); line-height: 1.4; margin: 0; color: color-mix(in srgb, var(--color-text) 78%, transparent); }
+
+.flowrow { display: flex; align-items: stretch; gap: 22px; }
+.step { flex: 1; background: var(--color-surface); border-radius: var(--radius-lg); padding: 30px 28px; display: flex; flex-direction: column; gap: 16px; }
+.step .n { font-family: var(--font-heading); font-size: var(--type-kicker); color: var(--color-accent); letter-spacing: 0.04em; }
+.step h3 { font-family: var(--font-heading); font-weight: 400; font-size: var(--type-small); margin: 0; line-height: 1.2; }
+.step p { margin: 0; font-size: var(--type-kicker); line-height: 1.4; }
+.chev { flex: 0 0 auto; align-self: center; width: 0; height: 0; border-top: 16px solid transparent; border-bottom: 16px solid transparent; border-left: 22px solid var(--color-accent-400); }
+
+.seq { position: relative; display: grid; grid-template-columns: repeat(6, 1fr); row-gap: 18px; }
+.lanes { position: absolute; inset: 74px 0 0 0; display: grid; grid-template-columns: repeat(3, 1fr); pointer-events: none; }
+.lanes span { justify-self: center; width: 3px; height: 100%; background: repeating-linear-gradient(to bottom, var(--color-neutral-400) 0 10px, transparent 10px 20px); }
+.lane-head { grid-row: 1; font-family: var(--font-heading); font-size: var(--type-small); text-align: center; padding-bottom: 22px; }
+.msg { position: relative; z-index: 1; background: var(--color-bg); border: 2px solid var(--color-accent-300); border-radius: 999px; padding: 12px 30px; font-size: var(--type-kicker); text-align: center; }
+.msg.sign { background: var(--color-accent-2-100); border-color: var(--color-accent-2-400); }
+.msg::after { content: ""; position: absolute; top: 50%; right: -16px; transform: translateY(-50%); border-top: 11px solid transparent; border-bottom: 11px solid transparent; border-left: 16px solid var(--color-accent-400); }
+.msg.rev::after { right: auto; left: -16px; border-left: 0; border-right: 16px solid var(--color-accent-400); }
+
+.table { width: 100%; border-collapse: collapse; font-size: var(--type-small); }
+.table th, .table td { text-align: left; padding: 20px 24px; border-bottom: 1px solid var(--color-divider); vertical-align: top; }
+.table thead th { font-family: var(--font-heading); font-weight: 400; font-size: var(--type-small); color: var(--color-accent-700); }
+.table tbody th { font-family: var(--font-body); font-size: var(--type-small); font-weight: 500; text-transform: none; letter-spacing: 0; color: color-mix(in srgb, var(--color-text) 62%, transparent); width: 26%; }
+.table thead th { text-transform: none; letter-spacing: 0; }
+
+.quote { justify-content: center; background: var(--color-accent-2-800); color: var(--color-bg); text-align: center; align-items: center; gap: 44px; }
+.quote blockquote { font-family: var(--font-heading); font-weight: 400; font-size: 68px; line-height: 1.2; margin: 0; max-width: 22ch; }
+.repo { font-family: var(--font-heading); font-size: var(--type-subtitle); background: var(--color-accent); color: var(--color-bg); border-radius: 999px; padding: 20px 48px; display: inline-block; }
+</style>
+</helmet>
+<x-import component-from-global-scope="deck-stage" from="./deck-stage.js" width="1920" height="1080" hint-size="100%,100%">
+
+<section data-label="Cover" data-screen-label="01" class="slide cover" data-speaker-notes="Eight minutes. Say the name, say the claim, move. The argument is civic, not technical.">
+  <p class="meta">A PEER-TO-PEER ALTERNATIVE TO THE THREE-TIER STACK</p>
+  <h1 class="display">Souspli</h1>
+  <p class="lede">Services built out of signed documents that people exchange and keep, instead of pages a server renders for them.</p>
+</section>
+
+<section data-label="Anatomy of three tiers" data-screen-label="02" class="slide" data-speaker-notes="Forty seconds. This is the shape of nearly everything on the web. Point at the permission box and the dashed column.">
+  <h2 class="slide-title">Anatomy of a three-tier service</h2>
+  <div class="diagram">
+    <div class="tiers">
+      <div class="tier">
+        <div class="tier-label">Clients</div>
+        <div class="tier-body"><div class="boxes"><span class="box">Web frontend</span><span class="box">iOS app</span><span class="box">Android app</span></div></div>
+      </div>
+      <div class="between"><i class="up"></i><i class="dn"></i></div>
+      <div class="tier">
+        <div class="tier-label">Edge</div>
+        <div class="tier-body"><div class="boxes"><span class="box">CDN cache</span><span class="box">Web server</span><span class="box">Per-request render</span></div></div>
+      </div>
+      <div class="between"><i class="up"></i><i class="dn"></i></div>
+      <div class="tier">
+        <div class="tier-label">Application</div>
+        <div class="tier-body">
+          <div class="boxes"><span class="box">REST API</span><span class="box">WebSocket gateway</span><span class="box hot">Permission checks</span><span class="box">Background queues</span></div>
+          <div class="roles"><span class="roles-label">ROLES DECIDED HERE</span><span class="role">Anonymous</span><span class="role">Customer</span><span class="role">Staff</span><span class="role">Auditor</span></div>
+        </div>
+      </div>
+      <div class="between"><i class="up"></i><i class="dn"></i></div>
+      <div class="tier">
+        <div class="tier-label">Data</div>
+        <div class="tier-body"><div class="boxes"><span class="box">Primary database</span><span class="box">Cache</span><span class="box">Object store</span><span class="box">Warehouse</span></div></div>
+      </div>
+    </div>
+    <aside class="thirdparty">
+      <h3>Third parties</h3>
+      <span class="tp">Payments</span>
+      <span class="tp">Email and SMS</span>
+      <span class="tp">Analytics</span>
+      <span class="tp">Advertising</span>
+      <span class="tp">Reached from the servers <em>and</em> from the user's own device</span>
+    </aside>
+  </div>
+  <p class="caption">Every byte the user sees is assembled by the operator, per request.</p>
+</section>
+
+<section data-label="Four services, one shape" data-screen-label="03" class="slide" data-speaker-notes="Thirty seconds, no dwelling. The point is that four unrelated industries produce the same diagram.">
+  <h2 class="slide-title">Four services, one shape</h2>
+  <div class="fourup">
+    <div class="mini">
+      <h3>Social network</h3>
+      <div class="band"><b>Clients</b><span>Web feed, iOS, Android</span></div>
+      <div class="band"><b>Edge</b><span>Media CDN, web server</span></div>
+      <div class="band hot"><b>Application</b><span>Ranking, messaging, visibility rules</span></div>
+      <div class="band"><b>Data</b><span>Social graph, posts, ad inventory</span></div>
+      <div class="band"><b>Roles</b><span>Member · Advertiser · Moderator · Police liaison</span></div>
+    </div>
+    <div class="mini">
+      <h3>Ride-hailing and delivery</h3>
+      <div class="band"><b>Clients</b><span>Rider app, driver app, merchant tablet</span></div>
+      <div class="band"><b>Edge</b><span>CDN, web server</span></div>
+      <div class="band hot"><b>Application</b><span>Dispatch, location, pricing rules</span></div>
+      <div class="band"><b>Data</b><span>Trips, routes, payments, telemetry</span></div>
+      <div class="band"><b>Roles</b><span>Rider · Driver · Fleet · Support · Regulator</span></div>
+    </div>
+    <div class="mini">
+      <h3>Event organising</h3>
+      <div class="band"><b>Clients</b><span>Event page, mobile app, door check-in</span></div>
+      <div class="band"><b>Edge</b><span>CDN, web server</span></div>
+      <div class="band hot"><b>Application</b><span>RSVP API, guest-list rules, reminders</span></div>
+      <div class="band"><b>Data</b><span>Groups, events, RSVPs, ticket orders</span></div>
+      <div class="band"><b>Roles</b><span>Attendee · Host · Co-organiser · Venue</span></div>
+    </div>
+    <div class="mini">
+      <h3>News publishing</h3>
+      <div class="band"><b>Clients</b><span>Web article, iOS, Android</span></div>
+      <div class="band"><b>Edge</b><span>Regional cache, per-request render</span></div>
+      <div class="band hot"><b>Application</b><span>Article API, paywall, personalisation</span></div>
+      <div class="band"><b>Data</b><span>Articles, subscribers, reader events</span></div>
+      <div class="band"><b>Roles</b><span>Reader · Subscriber · Journalist · Editor</span></div>
+    </div>
+  </div>
+</section>
+
+<section data-label="One URL, many pages" data-screen-label="04" class="slide" data-speaker-notes="The heart of the diagnosis. Same address, same second, different artefacts — and nobody can tell.">
+  <h2 class="slide-title">One URL, many pages</h2>
+  <div style="display: flex; flex-direction: column; gap: 30px;">
+    <div style="align-self: center; background: var(--color-accent-200); color: var(--color-accent-900); border-radius: 999px; padding: 16px 44px; font-size: var(--type-small);">example-news.com/2026/05/14/report</div>
+    <div class="between"><i class="dn"></i><i class="dn"></i><i class="dn"></i></div>
+    <div class="grid3">
+      <div class="card">
+        <p class="card-kicker">READER A · SUBSCRIBER</p>
+        <p>Full text, no advertising, a recirculation module built from her last forty articles.</p>
+      </div>
+      <div class="card">
+        <p class="card-kicker">READER B · METERED</p>
+        <p>Four paragraphs, then an offer priced by his country and his visit count.</p>
+      </div>
+      <div class="card">
+        <p class="card-kicker">READER C · ONE HOUR LATER</p>
+        <p>A revised headline, a corrected figure, different advertising. No notice that anything moved.</p>
+      </div>
+    </div>
+  </div>
+  <p class="caption">There is no artefact to keep, to compare, or to disagree with — only a rendering, and it is gone when the tab closes.</p>
+</section>
+
+<section data-label="Custody" data-screen-label="05" class="slide" data-speaker-notes="Twenty seconds. Three sentences and turn the corner.">
+  <h2 class="slide-title">What the four have in common</h2>
+  <div class="grid3">
+    <div class="card">
+      <p class="card-kicker">CUSTODY</p>
+      <p>The database is the system of record. The user holds a session, not a copy.</p>
+    </div>
+    <div class="card">
+      <p class="card-kicker">RULES</p>
+      <p>Who may see what is decided in the application tier, and can change overnight.</p>
+    </div>
+    <div class="card">
+      <p class="card-kicker">REACH</p>
+      <p>The client is a collection point too, opening connections to parties the user never chose.</p>
+    </div>
+  </div>
+</section>
+
+<section data-label="Divider" data-screen-label="06" class="slide divider" data-speaker-notes="Turn. The rest is the proposal.">
+  <h2 class="slide-title"><em>Sous pli</em>: under cover</h2>
+  <p class="lede">Everything that follows is one letter, exchanged between peers.</p>
+</section>
+
+<section data-label="Anatomy of a letter" data-screen-label="07" class="slide" data-speaker-notes="Walk the four annotations against the mock. This is the whole technical proposal.">
+  <h2 class="slide-title">Anatomy of a letter</h2>
+  <div style="display: grid; grid-template-columns: 700px 1fr; gap: 80px; align-items: start;">
+    <div class="docmock">
+      <p class="doc-sub">THE RIVERSIDE LEDGER · 14 MAY 2026</p>
+      <h3 class="doc-head">Flood defences approved after eight-year delay</h3>
+      <div class="rule"></div>
+      <div class="rule"></div>
+      <div class="rule short"></div>
+      <div class="rule"></div>
+      <div class="rule short"></div>
+      <div class="sigline">
+        <span class="seal"></span>
+        <span>Signed by The Riverside Ledger · sha256 4f9c…21ab</span>
+      </div>
+    </div>
+    <ul class="bullets">
+      <li><span class="dot"></span><span>One file of HTML. Text, images, styling and behaviour, all inside it.</span></li>
+      <li><span class="dot"></span><span>Readable as source by a person, and openable by any browser for as long as browsers exist.</span></li>
+      <li><span class="dot"></span><span>Signed by its author. The hash is the identity, so any edit makes a different document.</span></li>
+      <li><span class="dot"></span><span>Run in a sealed container: rich and interactive, with no way out to the network.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section data-label="Five guarantees" data-screen-label="08" class="slide" data-speaker-notes="Read the five headings only. If any one of them fails, the model collapses back into the web.">
+  <h2 class="slide-title">Five guarantees</h2>
+  <div class="numgrid">
+    <div class="numcard">
+      <span class="n">1</span>
+      <h3>Self-contained</h3>
+      <p>No external fetches. What you received is the whole of it.</p>
+    </div>
+    <div class="numcard">
+      <span class="n">2</span>
+      <h3>Human-readable</h3>
+      <p>Open technologies, plain markup, no build artefact to decode.</p>
+    </div>
+    <div class="numcard">
+      <span class="n">3</span>
+      <h3>Immutable</h3>
+      <p>Identified by content. A correction is a new letter, not a silent edit.</p>
+    </div>
+    <div class="numcard">
+      <span class="n">4</span>
+      <h3>Attributable</h3>
+      <p>Signed by the sender, so provenance travels with the file.</p>
+    </div>
+    <div class="numcard">
+      <span class="n">5</span>
+      <h3>Sealed</h3>
+      <p>Interactive, but with no exit. It cannot report on its reader.</p>
+    </div>
+  </div>
+  <p class="caption">Archiving is then a copy operation, and the copy is a complete one.</p>
+</section>
+
+<section data-label="The newspaper" data-screen-label="09" class="slide" data-speaker-notes="The physical-newspaper analogy. Same edition for everyone, yours to keep, yours to hand on.">
+  <h2 class="slide-title">The newspaper</h2>
+  <div class="flowrow">
+    <div class="step">
+      <span class="n">01</span>
+      <h3>The publisher composes</h3>
+      <p>The edition is written as one self-contained file, advertising included.</p>
+    </div>
+    <span class="chev"></span>
+    <div class="step">
+      <span class="n">02</span>
+      <h3>The publisher signs</h3>
+      <p>A signature and a content hash fix the edition. Nothing in it can move afterwards.</p>
+    </div>
+    <span class="chev"></span>
+    <div class="step">
+      <span class="n">03</span>
+      <h3>A reader fetches it</h3>
+      <p>From the publisher, or from anyone who already has it. The bytes are identical.</p>
+    </div>
+    <span class="chev"></span>
+    <div class="step">
+      <span class="n">04</span>
+      <h3>The reader keeps it</h3>
+      <p>Read it now or in a decade, shelve it, or hand it to a friend.</p>
+    </div>
+  </div>
+  <p class="caption">The advertisement inside is the one everyone else received — which is what an advertisement used to be.</p>
+</section>
+
+<section data-label="CV and contract" data-screen-label="10" class="slide" data-speaker-notes="A LinkedIn profile is a CV that somebody else keeps. Here it is a document you send.">
+  <h2 class="slide-title">The CV and the contract</h2>
+  <div class="seq">
+    <div class="lanes"><span></span><span></span><span></span></div>
+    <div class="lane-head" style="grid-column: 1 / 3;">Job seeker</div>
+    <div class="lane-head" style="grid-column: 3 / 5;">Recruiter</div>
+    <div class="lane-head" style="grid-column: 5 / 7;">Hiring manager</div>
+    <div class="msg sign" style="grid-column: 2 / 4;">Curriculum vitae, signed</div>
+    <div class="msg rev" style="grid-column: 2 / 4;">Letter: nothing suitable at present</div>
+    <div class="msg sign" style="grid-column: 2 / 4;">The same CV, to a second recruiter</div>
+    <div class="msg sign rev" style="grid-column: 2 / 4;">Representation agreement, signed</div>
+    <div class="msg sign" style="grid-column: 2 / 4;">Agreement countersigned</div>
+    <div class="msg" style="grid-column: 4 / 6;">Curriculum vitae, forwarded</div>
+    <div class="msg rev" style="grid-column: 4 / 6;">Letter: request for an interview</div>
+    <div class="msg rev" style="grid-column: 2 / 4;">Interview arrangements</div>
+  </div>
+  <p class="caption">Eight documents, three parties, no platform. Each party keeps the copies it was sent.</p>
+</section>
+
+<section data-label="Commercial paper" data-screen-label="11" class="slide" data-speaker-notes="Answer the structure objection here: the schema rides inside the letter, so agents check it locally and reply with a memorandum.">
+  <h2 class="slide-title">Commercial paper</h2>
+  <div class="flowrow">
+    <div class="step"><span class="n">BUYER</span><h3>Purchase order</h3><p>Line items, SKUs, delivery terms. Signed.</p></div>
+    <span class="chev"></span>
+    <div class="step"><span class="n">VENDOR</span><h3>Order acknowledgement</h3><p>Accepted lines, dates, substitutions.</p></div>
+    <span class="chev"></span>
+    <div class="step"><span class="n">CARRIER</span><h3>Delivery status report</h3><p>Consignment, handover, exceptions.</p></div>
+    <span class="chev"></span>
+    <div class="step"><span class="n">VENDOR</span><h3>Invoice</h3><p>References the order it settles.</p></div>
+    <span class="chev"></span>
+    <div class="step"><span class="n">BUYER</span><h3>Receipt</h3><p>Closes the chain. Every party holds the whole file.</p></div>
+  </div>
+  <p class="caption">The schema rides inside the letter, so a vendor's agent can reject a withdrawn SKU on its own machine and reply with a memorandum — itself a letter.</p>
+</section>
+
+<section data-label="Comparison" data-screen-label="12" class="slide" data-speaker-notes="The summary slide. Read down the right-hand column and stop.">
+  <h2 class="slide-title">Two models side by side</h2>
+  <table class="table">
+    <thead>
+      <tr><th></th><th>Three-tier service</th><th>Souspli</th></tr>
+    </thead>
+    <tbody>
+      <tr><th>System of record</th><td>The operator's database</td><td>The copy in each party's hands</td></tr>
+      <tr><th>What the user receives</th><td>A rendering, valid for one session</td><td>A file, valid indefinitely</td></tr>
+      <tr><th>Who sets the rules</th><td>The application tier, changeable at will</td><td>The terms written into the document</td></tr>
+      <tr><th>Same content for everyone</th><td>No, and not verifiably so</td><td>Yes, by content hash</td></tr>
+      <tr><th>Archiving</th><td>Screenshots and scrapers</td><td>Copy the file</td></tr>
+      <tr><th>Leakage from the client</th><td>Dozens of third-party connections</td><td>None; the container has no exit</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section data-label="Quote" data-screen-label="13" class="slide quote" data-speaker-notes="Slow right down. This is the argument; the architecture was only the evidence.">
+  <blockquote>The exchange of documents between free people is how we operated for centuries.</blockquote>
+  <p class="meta" style="color: var(--color-accent-2-300);">AND WE HAVE MORE THAN ENOUGH BANDWIDTH TO GO ON DOING IT</p>
+</section>
+
+<section data-label="Close" data-screen-label="14" class="slide cover" data-speaker-notes="The ask: go and run it. Say the URL out loud once, then leave the slide up.">
+  <p class="meta">THERE IS A WORKING PROOF OF CONCEPT</p>
+  <h2 class="display" style="font-size: 84px;">Download it and<br />open a letter</h2>
+  <span class="repo">souspli.org</span>
+</section>
+
+</x-import>
+
+</x-dc>
+</body>
+</html>

@@ -104,6 +104,8 @@ Nobody hosts it. [This one works today.](../use/forums.md)
 
 ## The argument is civic, not technical
 
+This page is the prose form of an eight-minute talk; [the slides](https://souspli.org/talk/) say the same thing faster.
+
 The exchange of documents between free people is how we operated for centuries —
 [it is a very old idea](an-old-idea.md) — and we have more than enough bandwidth to
 go on doing it. The architecture above is only the evidence that it is practical.
