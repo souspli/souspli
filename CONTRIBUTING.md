@@ -56,6 +56,12 @@ pnpm test:cage          # full end-to-end run, several minutes
   doing that.
 - Write commit messages and pull request descriptions for a reader who was not
   there.
+- Dependencies wait a week. No version younger than 7 days is installed:
+  `minimumReleaseAge` in `pnpm-workspace.yaml` enforces it for the app (on every
+  install, lockfile included), and `min-release-age` in `relay/.npmrc` and
+  `site/.npmrc` for those two, which needs npm 11 or later to take effect. If a
+  security fix can't wait, exclude that one package with
+  `minimumReleaseAgeExclude` and say why in the pull request.
 
 Docs use the public vocabulary (*letter*, *type*, *Souspli*); code keeps its own
 (*thing*, *program*, *shell*, *cage*). The [glossary](docs/glossary.md) maps them.
