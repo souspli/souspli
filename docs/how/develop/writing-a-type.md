@@ -2,7 +2,7 @@
 
 A **type** is one self-contained HTML file — inline CSS and JavaScript, no external
 references — that renders a letter from its `args`. In the code and on the wire it
-is called a *program*. The fifteen built-in types in `samples/` are all ordinary
+is called a *program*. The sixteen built-in types in `samples/` are all ordinary
 programs; read `samples/nametag.html` first, it is the smallest with real state.
 
 To try your own: **New → New from HTML…**, pick the file and any attachments.

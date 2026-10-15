@@ -67,7 +67,7 @@ pnpm world open ada     # the real app, on a populated library
 | `src/conformance/` | 41 portable test vectors so a second implementation can prove it agrees. |
 | `src/main/`, `src/preload/` | The sealed container ("the cage"). Imports nothing from the rest — enforced in CI. |
 | `src/shell/` | The desktop client ("the shell"): admission, keyring, library, transports, relays, trusted header. |
-| `samples/` | The fifteen built-in types, one HTML file each. |
+| `samples/` | The sixteen built-in types, one HTML file each. |
 | `relay/` | relay.souspli.org: a small Nostr relay for letters, on Cloudflare Workers + one Durable Object. Standalone package. |
 | `site/` | souspli.org, built from `docs/`. Standalone package. |
 | `test/` | The escape battery, ~270 end-to-end tests against the real app, ~190 unit tests. |

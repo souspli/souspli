@@ -127,7 +127,7 @@ test('a vote names a thing, not a key — junk directions are not votes', async 
   const bob = await person()
 
   // A weight a program could choose would let one key count for as much as it
-  // liked, so anything that is not exactly ±1 is program data.
+  // liked, so anything that is not exactly ±1 (or 0, a withdrawal) is program data.
   await asKey(bob.priv, 'vote', new Map<string, unknown>([['votesOn', post], ['dir', 99]]))
   await asKey(bob.priv, 'vote', new Map<string, unknown>([['votesOn', post], ['dir', 'up']]))
   await asKey(bob.priv, 'vote', new Map<string, unknown>([['votesOn', post]]))

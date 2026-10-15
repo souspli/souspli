@@ -123,9 +123,20 @@ Stated in the [specification §10](../protocol/spec.md) and on the
 - **Feed titles are author-supplied text in trusted territory.** Sanitised, plain
   text, visibly secondary and never able to carry a ✓ — but still a sentence a
   stranger chose, sitting next to a verified author. Treat it like a subject line.
+- **Forum text is author-supplied text in trusted territory, at length.** The forum
+  page shows posts' text and comments' bodies in the chrome, under the same rules as
+  titles (`sanitizeBody`: plain text set with `textContent`, no controls, bidi or
+  zero-width characters, no ✓) with one relaxation: line breaks survive. It is
+  drawn inside the author's box, under their self-chosen name, never beside a trust
+  signal of the chrome's own. A post's link opens only from main, built from the
+  post, http(s) only.
 - **Votes are signed without a confirmation dialog**, on the grounds that the control
   is in the trusted header. If a program could ever cause a vote to be cast, that is
   where it would break.
+- **Forum posts, comments, votes and names are signed without a confirmation dialog
+  once you have joined the forum.** The join is the consent and states the cost; the
+  letters come from the chrome's own forms, never from a program. Anything a
+  program asks to publish still goes through the confirm.
 - **Ranking can fall back to forgeable raw counts** when you have vouched for nobody.
   The interface says so; any path where it does not is a bug.
 - **Updates trust the release, not a second signature.** An update installs only if

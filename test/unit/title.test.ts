@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { claimedTitle, sanitizeTitle, MAX_TITLE_CHARS } from '../../src/shell/library/title'
+import { claimedTitle, sanitizeBody, sanitizeTitle, MAX_BODY_CHARS, MAX_TITLE_CHARS } from '../../src/shell/library/title'
 
 // A title is program-supplied text drawn in TRUSTED chrome. These pin the
 // terms it is allowed in on.
@@ -63,5 +63,29 @@ describe('sanitizeTitle', () => {
     expect(out.endsWith('…')).toBe(true)
     expect(out).not.toMatch(/[\uD800-\uDBFF]$|^[\uDC00-\uDFFF]/)
     expect(sanitizeTitle('x'.repeat(MAX_TITLE_CHARS))).toBe('x'.repeat(MAX_TITLE_CHARS))
+  })
+})
+
+describe('sanitizeBody', () => {
+  it('keeps paragraphs, and only paragraphs', () => {
+    expect(sanitizeBody('one\r\ntwo\n\n\n\nthree  \t four   ')).toBe('one\ntwo\n\nthree four')
+  })
+
+  it('is text: markup survives as its characters, for textContent to show', () => {
+    expect(sanitizeBody('<b>bold</b> & <a href="x">link</a>')).toBe('<b>bold</b> & <a href="x">link</a>')
+  })
+
+  it('strips what can reorder, hide or stack text, and borrowed check marks', () => {
+    expect(sanitizeBody('a\u202Eevil\u202Cb\u200Bc')).toBe('a evil b c')
+    expect(sanitizeBody('\u2713 verified \u2705')).toBe('verified')
+    expect(sanitizeBody('x\u0301\u0301\u0301\u0301')).toBe('x\u0301\u0301') // x has no precomposed form, so NFC leaves all four
+    expect(sanitizeBody('line\u2028sep')).toBe('line sep')
+  })
+
+  it('says nothing for nothing, and caps the rest by code point', () => {
+    expect(sanitizeBody('  \n\n \u200B ')).toBeNull()
+    const long = sanitizeBody('😀'.repeat(MAX_BODY_CHARS + 5))!
+    expect(Array.from(long)).toHaveLength(MAX_BODY_CHARS)
+    expect(long.endsWith('…')).toBe(true)
   })
 })

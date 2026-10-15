@@ -17,6 +17,8 @@ import {
   type StoredThing,
   type ThingRow
 } from './library/index.js'
+import { sanitizeBody, sanitizeTitle } from './library/title.js'
+import { firstSeen, rank } from './forum/rank.js'
 import { STARTERS, starterByKey, starterBytes } from './starters/index.js'
 import { WELCOME_FLAG, welcomeBundle } from './welcome/index.js'
 import { suggestedRelay, welcomeForumBundle } from './welcome/community.js'
@@ -342,8 +344,14 @@ interface ShellSurface {
   seedStart?: (envelopeHash: string) => Promise<Record<string, unknown>>
   seedStop?: (envelopeHash: string) => Record<string, unknown>
   seedStatus?: () => Record<string, unknown>[]
-  /** Cast a vote on a thing (+1 / -1), replacing your previous one. */
-  vote?: (envelopeHash: string, dir: 1 | -1) => Promise<Record<string, unknown>>
+  /** Cast a vote on a thing (+1 / -1, or 0 to take it back), replacing your previous one. */
+  vote?: (envelopeHash: string, dir: 1 | -1 | 0) => Promise<Record<string, unknown>>
+  /** The community forum, HN-style: join (one yes), front page, item, submit. */
+  forumState?: () => Record<string, unknown>
+  forumJoin?: (name: string) => Promise<Record<string, unknown>>
+  forumFront?: (sort?: string) => Record<string, unknown>
+  forumItem?: (envelopeHash: string) => Record<string, unknown>
+  forumSubmit?: (input: Record<string, unknown>) => Promise<Record<string, unknown>>
   /** What the votes on a thing are worth: raw counts, and the tribe split. */
   votes?: (envelopeHash: string) => Record<string, unknown>
   /** The whole conversation under a thing, with depth and parent. */
@@ -1638,10 +1646,10 @@ app.whenReady().then(async () => {
       if (v.dir > 0) {
         up++
         if (inTribe) tribeUp++
-      } else {
+      } else if (v.dir < 0) {
         down++
         if (inTribe) tribeDown++
-      }
+      } // 0 is a withdrawn vote: it counts for nothing
     }
     const mine = library.myVote(keyring.signer.scheme, myKeyHex(), targetHash)
     return {
@@ -1671,22 +1679,34 @@ app.whenReady().then(async () => {
    *  twice is refused rather than making a second identical thing. */
   async function castVote(targetHash: unknown, direction: unknown): Promise<Record<string, unknown>> {
     if (typeof targetHash !== 'string' || !HEX64.test(targetHash)) return { error: 'bad hash' }
-    if (direction !== 1 && direction !== -1) return { error: 'a vote is +1 or -1' }
+    if (direction !== 1 && direction !== -1 && direction !== 0) {
+      return { error: 'a vote is +1 or -1, or 0 to take one back' }
+    }
     if (!library.get(targetHash)) return { error: 'that letter is not in your library' }
     const current = library.myVote(keyring.signer.scheme, myKeyHex(), targetHash)
-    if (current && current.dir === direction) return { error: 'you have already voted that way' }
-    const starter = starterByKey('starter:vote')
-    if (!starter) return { error: 'the vote program is missing' }
-    const tar = await buildBundle(keyring.signer, {
-      program: starterBytes(starter),
-      type: 'vote',
-      args: jsToCbor({ votesOn: targetHash, dir: direction }),
-      attachments: new Map(),
-      enc: { e: NOSTR_ENC_SCHEME, ek: keyring.identity.nostrPubkey }
-    })
-    const outcome = await ingestBytes(tar)
-    if (outcome.status !== 'valid') return { error: String(outcome.reason ?? outcome.status) }
-    return { ...voteFacts(targetHash), envelopeHash: outcome.envelopeHash }
+    if ((current?.dir ?? 0) === direction) {
+      return { error: direction === 0 ? 'you have not voted on that' : 'you have already voted that way' }
+    }
+    // A vote on a forum post belongs to that forum too, so the forum's relay
+    // carries it and a per-forum subscription would see it.
+    const inGroup = inGroupOf(targetHash)
+    // Strictly later than your previous vote on this, in whole seconds. Only
+    // the latest vote counts, and `created` is all a READER has to tell which
+    // is latest: here the tie is broken by arrival order, but a relay hands
+    // two votes signed in the same second to everyone else in no promised
+    // order, so an upvote taken back at once could come out as the one that
+    // stands. A second or two of future-dating is the cheaper lie.
+    const prevCreated = current ? (library.get(current.envelopeHash)?.created ?? 0) : 0
+    const created = Math.max(Math.floor(Date.now() / 1000), prevCreated + 1)
+    const signed = await signStarter(
+      'starter:vote',
+      'vote',
+      { votesOn: targetHash, dir: direction, ...(inGroup ? { inGroup } : {}) },
+      created
+    )
+    if (!signed.envelopeHash) return { error: signed.error ?? 'could not sign the vote' }
+    const shared = await shareInForum(signed.envelopeHash)
+    return { ...voteFacts(targetHash), envelopeHash: signed.envelopeHash, shared }
   }
 
   /** The whole conversation under a thing, each entry with its parent, its
@@ -1911,6 +1931,253 @@ app.whenReady().then(async () => {
     }
     return out
   }
+
+  // ── The community forum, HN-style ──────────────────────────────────────────
+  // Joining is ONE yes (joinForum): the relay is added, the bundled forum is
+  // admitted, and the name you chose is signed. After that, posting,
+  // commenting, voting and naming yourself IN THAT FORUM go straight to its
+  // relays. The join was the consent, shown with its cost; asking again for
+  // every comment is how a forum stays empty. Everything else keeps its own
+  // press.
+  //
+  // These letters are signed here, from the chrome's own forms, with no
+  // confirm dialog, for the reason castVote gives: the confirm exists because
+  // a PROGRAM asked to publish in your name. No program is involved here; the
+  // intent was the click on Submit.
+  const JOINED_FORUM_SETTING = 'forum-joined'
+  const MAX_NAME_CHARS = 32
+  const MAX_POST_TITLE = 80 // what the chrome shows of any title (title.ts)
+  const MAX_POST_TEXT = 10_000
+
+  function joinedForum(): string | null {
+    const v = library.getSetting(JOINED_FORUM_SETTING)
+    return v && HEX64.test(v) ? v : null
+  }
+
+  /** Sign a built-in type with these args, as you, and admit it. */
+  async function signStarter(
+    starterKey: string,
+    type: string,
+    args: Record<string, unknown>,
+    created?: number
+  ): Promise<{ envelopeHash?: string; error?: string }> {
+    const starter = starterByKey(starterKey)
+    if (!starter) return { error: `the ${type} program is missing` }
+    const tar = await buildBundle(keyring.signer, {
+      program: starterBytes(starter),
+      type,
+      args: jsToCbor(args),
+      attachments: new Map(),
+      enc: { e: NOSTR_ENC_SCHEME, ek: keyring.identity.nostrPubkey },
+      ...(created !== undefined ? { created } : {})
+    })
+    const outcome = await ingestBytes(tar)
+    if (outcome.status !== 'valid' || typeof outcome.envelopeHash !== 'string') {
+      return { error: String(outcome.reason ?? outcome.status) }
+    }
+    return { envelopeHash: outcome.envelopeHash }
+  }
+
+  /** Post one of OUR letters to the relays, if it belongs to the joined forum. */
+  async function shareInForum(envelopeHash: string): Promise<boolean> {
+    const root = joinedForum()
+    if (!root || inGroupOf(envelopeHash) !== root) return false
+    const r = await postToRelays(envelopeHash)
+    if (r.error) record({ type: 'forum-post-failed', hash: envelopeHash, reason: String(r.error) })
+    return !r.error
+  }
+
+  function myForumName(root: string): string | null {
+    return library.forumNames(root).get(`${keyring.signer.scheme}:${myKeyHex()}`) ?? null
+  }
+
+  function forumState(): Record<string, unknown> {
+    const root = joinedForum()
+    const facts = root ? forumFacts(root) : null
+    return {
+      joined: root,
+      forumName: facts && typeof facts.name === 'string' ? facts.name : null,
+      name: root ? myForumName(root) : null,
+      me: myKeyHex(),
+      community: communityState()
+    }
+  }
+
+  function cleanName(name: unknown): string | null {
+    const clean = typeof name === 'string' ? sanitizeTitle(name) : null
+    return clean && Array.from(clean).length <= MAX_NAME_CHARS ? clean : null
+  }
+
+  /** What you are called in the joined forum: a signed nametag tagged into it. */
+  async function setForumName(name: unknown): Promise<Record<string, unknown>> {
+    const root = joinedForum()
+    if (!root) return { error: 'join the forum first' }
+    const clean = cleanName(name)
+    if (!clean) return { error: `a name is 1 to ${MAX_NAME_CHARS} characters` }
+    const signed = await signStarter('starter:nametag', 'nametag', { name: clean, inGroup: root })
+    if (!signed.envelopeHash) return { error: signed.error ?? 'could not sign the name' }
+    await shareInForum(signed.envelopeHash)
+    notifyFeedChanged()
+    return forumState()
+  }
+
+  /** The one yes: relay, forum, name. */
+  async function joinForum(name: unknown): Promise<Record<string, unknown>> {
+    if (!cleanName(name)) return { error: `choose a name of 1 to ${MAX_NAME_CHARS} characters` }
+    const joined = await joinCommunity()
+    if (joined.error) return joined
+    const root = typeof joined.forumHash === 'string' ? joined.forumHash : null
+    if (!root) return { error: 'the community forum is not available in this build' }
+    library.setSetting(JOINED_FORUM_SETTING, root)
+    return await setForumName(name)
+  }
+
+  function safeHttpUrl(raw: string): URL | null {
+    try {
+      const u = new URL(raw.trim())
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') return null
+      if (u.username || u.password) return null
+      return u
+    } catch {
+      return null
+    }
+  }
+
+  /** What a forum item says, made safe for the chrome (title.ts, sanitizeBody).
+   *  A domain is shown as the URL parser has it, so an internationalized name
+   *  appears in its xn-- form rather than as a lookalike. */
+  function forumItemText(envelopeHash: string, type: string): { url: string | null; domain: string | null; text: string | null } {
+    const stored = library.load(envelopeHash)
+    if (!stored) return { url: null, domain: null, text: null }
+    const args = cborToJs(stored.manifest.args) as Record<string, unknown>
+    const raw = type === 'comment' ? args.body : args.text
+    const text = typeof raw === 'string' ? sanitizeBody(raw) : null
+    let url: string | null = null
+    let domain: string | null = null
+    if (type === 'post' && typeof args.url === 'string' && args.url.trim()) {
+      const u = safeHttpUrl(args.url)
+      if (u) {
+        url = u.href
+        domain = u.hostname.replace(/^www\./, '')
+      }
+    }
+    return { url, domain, text }
+  }
+
+  function forumRowOut(
+    row: ThingRow,
+    root: string,
+    names: Map<string, string>,
+    mods: Map<string, string>,
+    votes: { voterScheme: string; voterKey: string; dir: number }[]
+  ): Record<string, unknown> & { points: number; firstSeen: number } {
+    const me = myKeyHex()
+    const mine = votes.find((v) => v.voterScheme === keyring.signer.scheme && v.voterKey === me)
+    return {
+      envelopeHash: row.envelopeHash,
+      type: row.type,
+      title: row.title ?? null,
+      ...forumItemText(row.envelopeHash, row.type),
+      points: votes.filter((v) => v.dir > 0).length,
+      voted: mine ? mine.dir > 0 : false,
+      authorScheme: row.authorScheme,
+      authorKey: row.authorKey,
+      name: names.get(`${row.authorScheme}:${row.authorKey}`) ?? null,
+      isMe: row.authorScheme === keyring.signer.scheme && row.authorKey === me,
+      firstSeen: firstSeen(row.created, row.receivedAt),
+      verdict: verdictOn(row.envelopeHash, root, mods)
+    }
+  }
+
+  /** The front page (`top`, ranked like HN) or `new`. Stories only: replies
+   *  live on the item page, and votes, names and moderation are machinery. */
+  function forumFront(sort: unknown): Record<string, unknown> {
+    const root = joinedForum()
+    if (!root) return { error: 'join the forum first', rows: [] }
+    const order = sort === 'new' ? 'new' : 'top'
+    const names = library.forumNames(root)
+    const mods = moderatorsOf(root)
+    const stories = library
+      .feed({ inGroup: root, rollUp: true, limit: 500 })
+      .filter((r) => r.type !== 'nametag' && !isForumMachinery(r))
+    const tallies = library.votesOnMany(stories.map((r) => r.envelopeHash))
+    const rows = stories.map((r) => ({
+      ...forumRowOut(r, root, names, mods, tallies.get(r.envelopeHash) ?? []),
+      comments: r.activity?.replies ?? 0
+    }))
+    return { ...forumState(), sort: order, now: Date.now(), rows: rank(rows, order, Date.now()).slice(0, 100) }
+  }
+
+  /** One story and everything under it, threaded. */
+  function forumItem(envelopeHash: unknown): Record<string, unknown> {
+    const root = joinedForum()
+    if (!root) return { error: 'join the forum first' }
+    if (typeof envelopeHash !== 'string' || !HEX64.test(envelopeHash)) return { error: 'bad hash' }
+    const row = library.get(envelopeHash)
+    if (!row) return { error: 'that post is not in your library' }
+    const names = library.forumNames(root)
+    const mods = moderatorsOf(root)
+    const nodes = library.thread(envelopeHash).filter((n) => n.row.type !== 'vote')
+    const tallies = library.votesOnMany([envelopeHash, ...nodes.map((n) => n.row.envelopeHash)])
+    const story = { ...forumRowOut(row, root, names, mods, tallies.get(envelopeHash) ?? []), comments: nodes.length }
+    const comments = nodes.map((n) => ({
+      ...forumRowOut(n.row, root, names, mods, tallies.get(n.row.envelopeHash) ?? []),
+      parent: n.parent,
+      depth: n.depth
+    }))
+    return { ...forumState(), now: Date.now(), story, comments }
+  }
+
+  /** Write into the forum from the chrome's own form: a story, or a comment
+   *  on a story or another comment. Signed, admitted, and posted. */
+  async function forumSubmit(input: unknown): Promise<Record<string, unknown>> {
+    const root = joinedForum()
+    if (!root) return { error: 'join the forum first' }
+    const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
+    const str = (v: unknown): string => (typeof v === 'string' ? v : '')
+    let signed: { envelopeHash?: string; error?: string }
+    if (i.kind === 'post') {
+      const title = str(i.title).trim()
+      const url = str(i.url).trim()
+      const text = str(i.text).trim()
+      if (!sanitizeTitle(title)) return { error: 'a post needs a title' }
+      if (Array.from(title).length > MAX_POST_TITLE) return { error: `a title is at most ${MAX_POST_TITLE} characters` }
+      if (url && !safeHttpUrl(url)) return { error: 'a link must be an http or https address' }
+      if (Array.from(text).length > MAX_POST_TEXT) return { error: `text is at most ${MAX_POST_TEXT} characters` }
+      signed = await signStarter('starter:post', 'post', {
+        title,
+        ...(url ? { url } : {}),
+        ...(text ? { text } : {}),
+        inGroup: root
+      })
+    } else if (i.kind === 'comment') {
+      const replyTo = str(i.replyTo)
+      const body = str(i.body).trim()
+      if (!HEX64.test(replyTo) || !library.get(replyTo)) return { error: 'nothing to reply to' }
+      if (inGroupOf(replyTo) !== root) return { error: 'that is not in this forum' }
+      if (!sanitizeBody(body)) return { error: 'a comment needs some words' }
+      if (Array.from(body).length > MAX_POST_TEXT) return { error: `a comment is at most ${MAX_POST_TEXT} characters` }
+      signed = await signStarter('starter:comment', 'comment', { replyTo, body, inGroup: root })
+    } else {
+      return { error: 'unknown kind' }
+    }
+    if (!signed.envelopeHash) return { error: signed.error ?? 'could not sign it' }
+    const shared = await shareInForum(signed.envelopeHash)
+    return { envelopeHash: signed.envelopeHash, shared }
+  }
+
+  /** Open a post's link in the system browser. Built from the post itself, in
+   *  main, never from a URL the chrome hands over. */
+  async function forumOpenLink(envelopeHash: unknown): Promise<boolean> {
+    if (typeof envelopeHash !== 'string' || !HEX64.test(envelopeHash)) return false
+    const row = library.get(envelopeHash)
+    if (!row || row.type !== 'post') return false
+    const { url } = forumItemText(envelopeHash, 'post')
+    if (!url) return false
+    await electronShell.openExternal(url)
+    return true
+  }
+
 
   /** Start a post in a forum: an ordinary thing that says which forum it is
    *  in. Nothing about the forum changes -- being tagged into one is a claim,
@@ -3300,6 +3567,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('shell:forum', (_e, h: unknown) => forumFacts(h))
   ipcMain.handle('shell:forum-listing', (_e, h: unknown) => forumListing(h))
   ipcMain.handle('shell:forum-post', (_e, h: unknown, key: unknown) => newForumPost(h, key))
+  ipcMain.handle('shell:forum-state', () => forumState())
+  ipcMain.handle('shell:forum-join', async (_e, name: unknown) => await joinForum(name))
+  ipcMain.handle('shell:forum-name', async (_e, name: unknown) => await setForumName(name))
+  ipcMain.handle('shell:forum-front', (_e, sort: unknown) => forumFront(sort))
+  ipcMain.handle('shell:forum-item', (_e, h: unknown) => forumItem(h))
+  ipcMain.handle('shell:forum-submit', async (_e, input: unknown) => await forumSubmit(input))
+  ipcMain.handle('shell:forum-open-link', async (_e, h: unknown) => await forumOpenLink(h))
   ipcMain.handle('shell:request-join', (_e, h: unknown) => requestJoin(h))
   ipcMain.handle('shell:new-verdict', (_e, h: unknown, g: unknown, v: unknown) => newVerdict(h, g, v))
   ipcMain.handle('shell:in-group', (_e, h: unknown) =>
@@ -3343,6 +3617,11 @@ app.whenReady().then(async () => {
   shell.forums = () => forums()
   shell.forum = (h) => forumFacts(h)
   shell.forumListing = (h) => forumListing(h)
+  shell.forumState = () => forumState()
+  shell.forumJoin = (name) => joinForum(name)
+  shell.forumFront = (sort) => forumFront(sort)
+  shell.forumItem = (h) => forumItem(h)
+  shell.forumSubmit = (input) => forumSubmit(input)
   shell.newForumPost = (h, key) => newForumPost(h, key)
   shell.requestJoin = (h) => requestJoin(h)
   shell.newVerdict = (h, g, v) => newVerdict(h, g, v)

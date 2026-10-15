@@ -48,10 +48,14 @@ program is ordinary program state and stays editable.
 
 ### Votes
 
-`vote` args: `{ votesOn: <hash>, dir: 1 | -1, why?: string }`.
+`vote` args: `{ votesOn: <hash>, dir: 1 | -1 | 0, why?: string }`.
 
-- `dir` is exactly `+1` or `-1`. Anything else is not a vote: a weight a program
-  could choose would let one key count for as much as it liked.
+- `dir` is exactly `+1`, `-1` or `0`. Anything else is not a vote: a weight a
+  program could choose would let one key count for as much as it liked.
+- `0` is a **withdrawal**. A signed vote cannot be unsaid, so taking one back is a
+  later vote that says neither; it replaces the earlier one and counts for nothing.
+  Clients that predate it ignore it as program data, and so keep counting the
+  earlier vote.
 - Per `(voter key, target)` only the **latest** vote counts. "Latest" is `created`
   descending, ties broken by local arrival order — `created` is a claim in whole
   seconds, and pressing ▲ then ▼ happens inside one.
