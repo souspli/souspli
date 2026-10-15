@@ -1,6 +1,7 @@
 import './evm-ui.css'
 import './shell.css'
 import { shortAddress, toChecksumAddress } from '../address.js'
+import { createForumPage, type ForumApi } from './forum.js'
 
 // ── The shell chrome (trusted renderer) ──────────────────────────────────────
 // Draws the omnibar, feed, per-thing trust header, and confirm dialogs. Every
@@ -8,7 +9,7 @@ import { shortAddress, toChecksumAddress } from '../address.js'
 // renders into a separate native view composited into the main area only).
 // Styled with the evm-ui design language (dark, teal accent) via CSS classes.
 
-interface ShellApi {
+interface ShellApi extends ForumApi {
   identity(): Promise<{ address: string; nostrPubkey: string; keyStorage: 'os' | 'software' }>
   feed(query?: unknown): Promise<ThingRow[]>
   ingest(base64: string): Promise<Outcome>
@@ -33,7 +34,7 @@ interface ShellApi {
   seedStatus(): Promise<{ envelopeHash: string; magnet: string; peers: number; bytes: number; type: string }[]>
   offers(inGroup?: string): Promise<OfferRow[]>
   fetchOffer(envelopeHash: string): Promise<Record<string, unknown>>
-  vote(envelopeHash: string, dir: 1 | -1): Promise<Record<string, unknown>>
+  vote(envelopeHash: string, dir: 1 | -1 | 0): Promise<Record<string, unknown>>
   votes(envelopeHash: string): Promise<Record<string, number>>
   thread(envelopeHash: string): Promise<{ rows: Record<string, unknown>[]; count: number }>
   forums(): Promise<Record<string, unknown>[]>
@@ -297,6 +298,8 @@ const ingestBtn = el('button', 'evm-btn evm-btn--primary evm-btn--sm', 'Ingest')
 const fileBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Open file…') as HTMLButtonElement
 const newBtn = el('button', 'evm-btn evm-btn--primary evm-btn--sm', 'New') as HTMLButtonElement
 newBtn.setAttribute('data-testid', 'new-thing')
+const forumBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Forum') as HTMLButtonElement
+forumBtn.setAttribute('data-testid', 'forum-open')
 const fileInput = el('input') as HTMLInputElement
 fileInput.type = 'file'
 fileInput.style.display = 'none'
@@ -375,6 +378,7 @@ const bottomRow = el('div', 'sh-topbar-row')
 topRow.append(ingestInput, fetchWarn, ingestBtn)
 bottomRow.append(
   newBtn,
+  forumBtn,
   fileBtn,
   fileInput,
   toast,
@@ -3565,6 +3569,8 @@ function moreControl(
 let openSeq = 0
 
 async function openThing(envelopeHash: string): Promise<void> {
+  // A letter opens in the sealed view, which the forum page covers.
+  if (forumPage.isOpen()) forumPage.close()
   const seq = ++openSeq
   selected = envelopeHash
   const header = await shell.open(envelopeHash)
@@ -3658,7 +3664,29 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 // Test hook: let the N6 pixel test drive a real open (renders the trust header)
 // without simulating a click. Harmless in the trusted chrome.
+// ── The community forum page (forum.ts) ─────────────────────────────────────
+const forumPage = createForumPage({
+  shell,
+  setVisible(on) {
+    feedPane.hidden = on
+    main.hidden = on
+    forumBtn.classList.toggle('evm-btn--primary', on)
+    forumBtn.classList.toggle('evm-btn--secondary', !on)
+  },
+  openLetter: (h) => void openThing(h),
+  notify: (msg, tone) => showText(msg, tone),
+  shortKey: (k) => shortAddress(k),
+  fullKey: (k) => toChecksumAddress(k)
+})
+app.append(forumPage.root)
+forumBtn.addEventListener('click', () => {
+  if (forumPage.isOpen()) forumPage.close()
+  else void forumPage.open()
+})
+
 ;(window as unknown as { __shellChrome: unknown }).__shellChrome = {
+  openForumPage: (route?: Parameters<typeof forumPage.open>[0]) => forumPage.open(route),
+  closeForumPage: () => forumPage.close(),
   openThing,
   openPeople: openPeopleModal,
   openTransfers: openTransfersModal,
@@ -3675,6 +3703,7 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 // ── Boot ─────────────────────────────────────────────────────────────────────
 shell.onFeedChanged(() => {
+  forumPage.refresh()
   void refreshFeed()
   // Keep the comment count fresh without rebuilding the header (a rebuild
   // would re-run renderModeToggle and move the pinned controls).
