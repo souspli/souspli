@@ -10,6 +10,7 @@ import invoiceHtml from '../../../samples/invoice.html?raw'
 import memoHtml from '../../../samples/memo.html?raw'
 import nametagHtml from '../../../samples/nametag.html?raw'
 import posterHtml from '../../../samples/poster.html?raw'
+import postHtml from '../../../samples/post.html?raw'
 import todoHtml from '../../../samples/todo.html?raw'
 import voteHtml from '../../../samples/vote.html?raw'
 import vouchHtml from '../../../samples/vouch.html?raw'
@@ -91,6 +92,13 @@ export const STARTERS: readonly Starter[] = [
     label: 'News article',
     description: 'Headings, images text wraps around, footnotes.',
     html: articleHtml
+  },
+  {
+    key: 'starter:post',
+    type: 'post',
+    label: 'Forum post',
+    description: 'A title, and a link or some text. Small enough to travel whole.',
+    html: postHtml
   },
   {
     key: 'starter:comment',

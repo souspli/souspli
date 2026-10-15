@@ -48,6 +48,8 @@ export type CageEvent =
   // The bundled first-run letter failed the same gate everything else meets.
   // It should be impossible, which is the reason to hear about it.
   | { type: 'welcome-rejected'; reason: string }
+  // A letter of ours in the joined forum that could not be posted to its relays.
+  | { type: 'forum-post-failed'; hash: string; reason: string }
 
 /** TEST-ONLY payload capture. A separate buffer that DOES retain emit payloads
  *  so the Playwright suite can assert on them. Populated only when

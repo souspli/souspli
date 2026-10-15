@@ -189,11 +189,16 @@ export function vouchSubject(args: unknown): { scheme: string; key: string } | n
 
 /** What a vote CLAIMS: which thing, and which way.
  *
- *  Direction is exactly +1 or -1. Anything else -- 0, 7, a string, a float
+ *  Direction is exactly +1, -1, or 0. Anything else -- 7, a string, a float
  *  (which canonical CBOR refuses outright) -- is not a vote, it is program
  *  data, and is ignored rather than coerced into one. A weight a program could
- *  choose would make a single key worth as much as it liked. */
-export function voteClaim(args: unknown): { target: string; dir: 1 | -1 } | null {
+ *  choose would make a single key worth as much as it liked.
+ *
+ *  0 is a WITHDRAWAL. A signed vote cannot be unsaid, so taking one back is a
+ *  later vote that says "neither": as each key's latest vote is its current
+ *  word, it replaces the earlier one and counts for nothing either way. It
+ *  adds no weight, so it does not reopen the hole above. */
+export function voteClaim(args: unknown): { target: string; dir: 1 | -1 | 0 } | null {
   const target = refTarget(args, 'votesOn')
   if (!target) return null
   const raw =
@@ -202,7 +207,7 @@ export function voteClaim(args: unknown): { target: string; dir: 1 | -1 } | null
       : args && typeof args === 'object' && !Array.isArray(args)
         ? (args as Record<string, unknown>).dir
         : undefined
-  if (raw !== 1 && raw !== -1) return null
+  if (raw !== 1 && raw !== -1 && raw !== 0) return null
   return { target, dir: raw }
 }
 
@@ -1692,7 +1697,7 @@ export class Library {
     for (const r of rows) {
       const cur = out.get(r.target_hash) ?? { up: 0, down: 0 }
       if (r.dir > 0) cur.up += r.n
-      else cur.down += r.n
+      else if (r.dir < 0) cur.down += r.n // 0 is a withdrawn vote: neither
       out.set(r.target_hash, cur)
     }
     return out
@@ -1711,6 +1716,30 @@ export class Library {
     if (!root || root.type !== 'group') return null
     const history = this.chainHistory(root.authorKey, rootHash)
     return history.length > 0 ? history[history.length - 1]! : root
+  }
+
+  /** What each author calls themselves in a forum: the newest `nametag` they
+   *  signed with `inGroup` set to it, by its sanitized title (its `name`).
+   *
+   *  A name is the author's own claim -- nobody else can sign one for them,
+   *  but nothing stops two people choosing the same one -- so the chrome shows
+   *  it as chosen, never as verified, with the key one hover away. Scoped to
+   *  the forum so an old "Hello, my name is" nametag made for fun is not
+   *  mistaken for what someone wants to be called here. */
+  forumNames(rootHash: string): Map<string, string> {
+    const rows = this.db
+      .prepare(
+        `SELECT t.author_scheme, t.author_key, ti.title
+           FROM things t
+           JOIN refs r ON r.envelope_hash = t.envelope_hash AND r.rel = 'inGroup' AND r.target_hash = ?
+           JOIN titles ti ON ti.envelope_hash = t.envelope_hash
+          WHERE t.type = 'nametag'
+          ORDER BY t.created ASC, t.rowid ASC`
+      )
+      .all(rootHash) as { author_scheme: string; author_key: string; title: string }[]
+    const out = new Map<string, string>()
+    for (const r of rows) out.set(`${r.author_scheme}:${r.author_key}`, r.title) // later wins
+    return out
   }
 
   /** Everything claiming to belong to a group, newest first. Claims: being

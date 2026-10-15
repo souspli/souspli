@@ -32,6 +32,7 @@ const TYPE_IDENTITY: Record<string, string> = {
   'join-request': 'ae2bfcc6c6f11ea07e7a954a6ec2abcf86d77c7e76078dcb601a593a73ef2cc7',
   memo: '2358d30a800fd69b618991a488404ad7ea99d0fa46d3470cfd5287af925562f6',
   nametag: 'a9617356275434724d949f7b6733bec40a29a4ef6ee86071e38978547687e36a',
+  post: '96d63e37ec246bf7b8a729fd099516eeeea783ab5329e11d3336b1fc1d5a0381',
   poster: 'd147eba4228a3e121a7d1b775382a5a9dde4d7f34345e1ca7c0805d141fd3f90',
   todo: '2b5c7fd640484ab616b59db724b58c1beff303145459834c87fc987ebc183f64',
   vote: 'ec0e5021eac8153995c5fcb5bbe5208acf0a810aebc02b3ab4588481d4e8961b',
@@ -40,7 +41,7 @@ const TYPE_IDENTITY: Record<string, string> = {
 
 describe('starters', () => {
   it('ships every sample', () => {
-    expect(STARTERS.length).toBe(15)
+    expect(STARTERS.length).toBe(16)
     expect([...STARTERS].map((s) => s.type).sort()).toEqual([
       'article',
       'attestation',
@@ -53,6 +54,7 @@ describe('starters', () => {
       'join-request',
       'memo',
       'nametag',
+      'post',
       'poster',
       'todo',
       'vote',
@@ -79,9 +81,9 @@ describe('starters', () => {
   })
 
   it('has distinct keys, types, and programs', () => {
-    expect(new Set(STARTERS.map((s) => s.key)).size).toBe(15)
-    expect(new Set(STARTERS.map((s) => s.type)).size).toBe(15)
-    expect(new Set(STARTERS.map((s) => s.html)).size).toBe(15)
+    expect(new Set(STARTERS.map((s) => s.key)).size).toBe(16)
+    expect(new Set(STARTERS.map((s) => s.type)).size).toBe(16)
+    expect(new Set(STARTERS.map((s) => s.html)).size).toBe(16)
   })
 
   it('resolves by key and rejects unknown keys', () => {

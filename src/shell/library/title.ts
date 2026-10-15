@@ -72,3 +72,44 @@ export function claimedTitle(args: unknown): string | null {
   }
   return null
 }
+
+// ── Bodies: the second kind of program text in the chrome ────────────────────
+//
+// The forum page shows what people wrote -- a post's text, a comment's body --
+// in trusted chrome, not one line of it in a cage. That is more of the
+// author's claim crossing the line, so it crosses on the same terms as a
+// title and only one is relaxed: line breaks survive, because paragraphs are
+// how people write. Everything else holds:
+//
+//   · plain text, set with textContent, never markup -- a <b> is five
+//     characters, a link is its letters;
+//   · no controls, bidi overrides or isolates, zero-widths, or stacked marks;
+//   · no check marks, which stay the chrome's word for VERIFIED;
+//   · capped, so a body cannot be a denial of service on the page.
+//
+// The chrome draws it inside the author's box, under their (claimed) name, and
+// never beside a trust signal of its own.
+
+export const MAX_BODY_CHARS = 10_000
+
+// INVISIBLE, minus the newline it would otherwise turn into a space.
+const INVISIBLE_KEEP_NEWLINE =
+  /[\u0000-\u0009\u000B-\u001F\u007F-\u009F\u00AD\u061C\u180E\u200B-\u200F\u2028-\u202E\u2060-\u206F\uFEFF\u{E0000}-\u{E007F}]/gu
+
+/** Make arbitrary program text safe to show as paragraphs in trusted chrome. */
+export function sanitizeBody(raw: string): string | null {
+  const clean = raw
+    .normalize('NFC')
+    .replace(/\r\n?/g, '\n')
+    .replace(INVISIBLE_KEEP_NEWLINE, ' ')
+    .replace(CHECKS, '')
+    .replace(STACKED_MARKS, '$1')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+/g, ' ').trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+  if (clean.length === 0) return null
+  const points = Array.from(clean)
+  return points.length > MAX_BODY_CHARS ? points.slice(0, MAX_BODY_CHARS - 1).join('').trimEnd() + '…' : clean
+}

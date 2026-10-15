@@ -14,7 +14,7 @@ macOS, Windows and Linux):
   blocked, verified from *outside* the renderer by a listener that must stay silent.
 - The **format**: canonical encoding, hashing, signing, sealing, and the admission
   gate that refuses anything not fully verified.
-- Writing, publishing, versioning, copying and exporting letters; the fifteen
+- Writing, publishing, versioning, copying and exporting letters; the sixteen
   built-in [types](types.md); drafts with attachments.
 - Comments and threads, attestations, co-signed documents, votes.
 - Groups and forums: rosters, join requests, posting and replying from the app,

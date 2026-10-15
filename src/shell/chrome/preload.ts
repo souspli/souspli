@@ -134,7 +134,7 @@ const shell = {
   /** Votes. A vote is about a THING; saying you know a KEY is a vouch, and
    *  the shell keeps them apart because it walks vouch edges to build your
    *  tribe. Casting one signs immediately — the click was the intent. */
-  vote: (envelopeHash: string, dir: 1 | -1): Promise<Record<string, unknown>> =>
+  vote: (envelopeHash: string, dir: 1 | -1 | 0): Promise<Record<string, unknown>> =>
     ipcRenderer.invoke('shell:vote', envelopeHash, dir),
   votes: (envelopeHash: string): Promise<Record<string, number>> =>
     ipcRenderer.invoke('shell:votes', envelopeHash),
@@ -240,6 +240,15 @@ const shell = {
   onPublishResult: (cb: (outcome: Record<string, unknown>) => void): void => {
     ipcRenderer.on('shell:publish-result', (_e, outcome) => cb(outcome))
   },
+  // ── The community forum, HN-style (one yes to join; see joinForum in main) ──
+  forumState: (): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:forum-state'),
+  forumJoin: (name: string): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:forum-join', name),
+  forumName: (name: string): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:forum-name', name),
+  forumFront: (sort: 'top' | 'new'): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:forum-front', sort),
+  forumItem: (envelopeHash: string): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:forum-item', envelopeHash),
+  forumSubmit: (input: Record<string, unknown>): Promise<Record<string, unknown>> =>
+    ipcRenderer.invoke('shell:forum-submit', input),
+  forumOpenLink: (envelopeHash: string): Promise<boolean> => ipcRenderer.invoke('shell:forum-open-link', envelopeHash),
   // ── Updates: every network step is a human's yes (src/shell/update) ────────
   updateStatus: (): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:update-status'),
   updateCheck: (): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:update-check'),

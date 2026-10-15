@@ -70,7 +70,7 @@ are contradicted a few centimetres above them.
 | `src/conformance/` | pure library | [Conformance vectors](../protocol/conformance.md) and runner. |
 | `src/main/`, `src/preload/` | container | The cage: hardened view, `thing://` handler, stores, bridge. **Imports nothing from the shell or the format.** |
 | `src/shell/` | main process | The client: `admission/`, `keyring/`, `library/`, `mount/`, `transport/`, `torrent/`, `nostr/`, `naming/`, `starters/`, `chrome/`. |
-| `samples/` | letters | The fifteen built-in types, one HTML file each. |
+| `samples/` | letters | The sixteen built-in types, one HTML file each. |
 | `test/` | | Escape battery, client specs, unit tests. |
 | `tools/world/` | | The [30-account world](../develop/world.md). |
 

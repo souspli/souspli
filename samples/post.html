@@ -1,0 +1,84 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>post</title>
+<style>
+  body { margin: 0; font: 15px/1.55 system-ui, sans-serif; background: #1d2320; color: #d8d4c8;
+         display: flex; justify-content: center; padding: 24px; box-sizing: border-box; min-height: 100vh; }
+  .post { width: 38em; max-width: 100%; }
+  h1 { font-size: 20px; margin: 0 0 4px; color: #e6e2d6; }
+  h1.empty { color: #7d8a80; font-style: italic; }
+  .url { font-size: 13px; color: #8a978d; word-break: break-all; margin: 0 0 14px; }
+  .text { white-space: pre-wrap; margin: 0; }
+  label { display: block; font-size: 12px; color: #8a978d; margin: 12px 0 4px; }
+  input, textarea { font: inherit; width: 100%; box-sizing: border-box; border: 1px solid #3f4a43;
+                    border-radius: 4px; padding: 6px 8px; background: #1f2521; color: #e6e2d6; }
+  textarea { min-height: 8em; resize: vertical; }
+  .note { margin-top: 12px; font-size: 12px; color: #7d8a80; }
+</style>
+</head>
+<body>
+  <div class="post"><div id="app"></div></div>
+  <script>
+    'use strict';
+    // A forum post, the way a link aggregator has them: a title, and a link or
+    // some text (or both). Small on purpose: a post must travel whole, inside
+    // one relay event (32 KiB with its program), so nobody has to seed it and
+    // nobody has to press Fetch to read it.
+    //
+    // inGroup (which forum) is seeded by the shell and is the author's claim.
+    // args are whole-set replacement on every emit, so it is echoed back every
+    // time; dropping it would quietly move the post out of its forum.
+    //
+    // The link is shown, never followed: this view has no network. The shell's
+    // forum page is where a reader can choose to open it.
+    var a = window.bridge.getArgs() || {};
+    var args = (a && typeof a.args === 'object' && a.args !== null) ? a.args : {};
+    var app = document.getElementById('app');
+
+    function str(v) { return typeof v === 'string' ? v : ''; }
+    function el(tag, text, cls) {
+      var e = document.createElement(tag);
+      if (text !== undefined) e.textContent = text;
+      if (cls) e.className = cls;
+      return e;
+    }
+
+    function viewMode() {
+      var title = el('h1', str(args.title) || 'Untitled', str(args.title) ? '' : 'empty');
+      title.id = 'view-title';
+      app.replaceChildren(title);
+      if (str(args.url)) {
+        var u = el('p', str(args.url), 'url'); u.id = 'view-url';
+        app.append(u);
+      }
+      if (str(args.text)) {
+        var t = el('p', str(args.text), 'text'); t.id = 'view-text';
+        app.append(t);
+      }
+    }
+
+    function editMode() {
+      var title = el('input'); title.id = 'edit-title'; title.value = str(args.title);
+      var url = el('input'); url.id = 'edit-url'; url.value = str(args.url); url.placeholder = 'https://…';
+      var text = el('textarea'); text.id = 'edit-text'; text.value = str(args.text);
+      app.replaceChildren(el('label', 'Title'), title, el('label', 'Link (optional)'), url,
+        el('label', 'Text (optional)'), text,
+        el('div', 'Preview in View, then publish from the shell header.', 'note'));
+      function streamDraft() {
+        var next = { title: title.value, url: url.value.trim(), text: text.value };
+        if (str(args.inGroup)) next.inGroup = str(args.inGroup);
+        window.bridge.emit('draft', { type: 'post', args: next });
+      }
+      title.addEventListener('input', streamDraft);
+      url.addEventListener('input', streamDraft);
+      text.addEventListener('input', streamDraft);
+      streamDraft();
+      title.focus();
+    }
+
+    if (a.mode === 'edit') editMode(); else viewMode();
+  </script>
+</body>
+</html>
