@@ -1160,13 +1160,27 @@ function renderSafety(keyStorage: 'os' | 'software'): void {
   } catch {
     /* ignore */
   }
-  // First-run questions come one at a time: the safety notice, then updates.
+  // First-run questions come one at a time: the safety notice, then the
+  // forum's join card (if it has never been answered), then updates.
   const askUpdates = (): void =>
     void shell.updateStatus().then((s) => {
       if (s.prompt) updateConsentModal()
     })
-  if (!acked) safetyModal(keyStorage, askUpdates)
-  else askUpdates()
+  const offerForum = async (): Promise<void> => {
+    let later = false
+    try {
+      later = localStorage.getItem(FORUM_LATER_KEY) === '1'
+    } catch {
+      /* private mode: offer again, harmless */
+    }
+    const fs = (await shell.forumState()) as { prompt?: boolean }
+    if (fs.prompt === true && !later) {
+      afterForumJoin = askUpdates
+      await forumPage.open()
+    } else askUpdates()
+  }
+  if (!acked) safetyModal(keyStorage, () => void offerForum())
+  else void offerForum()
 }
 
 // ── Feed ─────────────────────────────────────────────────────────────────────
@@ -3665,6 +3679,10 @@ function bytesToBase64(bytes: Uint8Array): string {
 // Test hook: let the N6 pixel test drive a real open (renders the trust header)
 // without simulating a click. Harmless in the trusted chrome.
 // ── The community forum page (forum.ts) ─────────────────────────────────────
+// "Not now" on the first-run join card is remembered here, so it is offered
+// once; the Forum button offers it again whenever someone wants it.
+const FORUM_LATER_KEY = 'sh-forum-later'
+let afterForumJoin: (() => void) | null = null
 const forumPage = createForumPage({
   shell,
   setVisible(on) {
@@ -3676,7 +3694,20 @@ const forumPage = createForumPage({
   openLetter: (h) => void openThing(h),
   notify: (msg, tone) => showText(msg, tone),
   shortKey: (k) => shortAddress(k),
-  fullKey: (k) => toChecksumAddress(k)
+  fullKey: (k) => toChecksumAddress(k),
+  onJoinSettled(joined) {
+    if (!joined) {
+      try {
+        localStorage.setItem(FORUM_LATER_KEY, '1')
+      } catch {
+        /* private mode: offered again next time */
+      }
+      forumPage.close()
+    }
+    const next = afterForumJoin
+    afterForumJoin = null
+    next?.()
+  }
 })
 app.append(forumPage.root)
 forumBtn.addEventListener('click', () => {

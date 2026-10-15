@@ -475,6 +475,9 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
   // Likewise the first-run "Check for updates?" question: a real modal, so it
   // would hide every cage. update.spec.ts turns it back on.
   env.SHELL_NO_UPDATE_PROMPT = '1'
+  // And the first-run join card for the community forum: it covers the cages
+  // too. forum-hn.spec.ts turns it back on.
+  env.SHELL_NO_JOIN_PROMPT = '1'
   // Identity changes normally restart the app; under Playwright that would
   // orphan the process, so specs relaunch explicitly instead.
   env.SHELL_NO_RELAUNCH = '1'

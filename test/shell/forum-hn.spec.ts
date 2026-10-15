@@ -230,3 +230,45 @@ test('a new person, clicking: Forum → name → Join → submit → comment →
     await carol.close()
   }
 })
+
+test('first run: the join card follows the safety notice, and "Not now" is remembered', async () => {
+  const { mkdtempSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const env = { SHELL_SUGGESTED_RELAY: relay.url, SHELL_WELCOME_FORUM_B64: forumB64, SHELL_NO_JOIN_PROMPT: '0' }
+  const page = (s: ShellHandle) => chromeEval<string | null>(s, `document.querySelector('[data-testid=forum-page]')?.hidden === false ? document.querySelector('[data-testid=forum-page]').dataset.page : null`)
+
+  // Someone who joins straight from it: safety notice (acked by the harness), name, Join.
+  const dave = await launchShell({ extraEnv: env })
+  try {
+    await expect.poll(() => page(dave), { timeout: 15_000 }).toBe('join')
+    await chromeEval(dave, `(() => { const e = document.querySelector('[data-testid=forum-join-name]'); e.value = 'dave'; })()`)
+    await chromeEval(dave, `document.querySelector('[data-testid=forum-join-go]').click()`)
+    await expect.poll(() => page(dave), { timeout: 15_000 }).toBe('top')
+    expect((await chromeEval<Record<string, unknown>>(dave, `window.shell.forumState()`)).name).toBe('dave')
+  } finally {
+    await dave.close()
+  }
+
+  // Someone who would rather not: it closes, and stays closed next launch.
+  const dir = mkdtempSync(join(tmpdir(), 'shell-userdata-'))
+  const erin = await launchShell({ extraEnv: { ...env, SHELL_USER_DATA_DIR: dir } })
+  try {
+    await expect.poll(() => page(erin), { timeout: 15_000 }).toBe('join')
+    await chromeEval(erin, `document.querySelector('[data-testid=forum-join-later]').click()`)
+    await expect.poll(() => page(erin)).toBeNull()
+    expect((await chromeEval<Record<string, unknown>>(erin, `window.shell.forumState()`)).joined).toBeNull()
+  } finally {
+    await erin.close()
+  }
+  const again = await launchShell({ extraEnv: { ...env, SHELL_USER_DATA_DIR: dir } })
+  try {
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(await page(again), 'not offered a second time').toBeNull()
+    // ...but the Forum button still offers it.
+    await chromeEval(again, `document.querySelector('[data-testid=forum-open]').click()`)
+    await expect.poll(() => page(again), { timeout: 10_000 }).toBe('join')
+  } finally {
+    await again.close()
+  }
+})

@@ -1994,12 +1994,17 @@ app.whenReady().then(async () => {
   function forumState(): Record<string, unknown> {
     const root = joinedForum()
     const facts = root ? forumFacts(root) : null
+    const community = communityState()
     return {
       joined: root,
       forumName: facts && typeof facts.name === 'string' ? facts.name : null,
       name: root ? myForumName(root) : null,
       me: myKeyHex(),
-      community: communityState()
+      community,
+      // Whether first run should offer the join card. Suppressed under test
+      // (SHELL_NO_JOIN_PROMPT), like the welcome letter and the update
+      // question, so specs do not start behind it.
+      prompt: !root && community.forumAvailable === true && process.env.SHELL_NO_JOIN_PROMPT !== '1'
     }
   }
 

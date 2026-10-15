@@ -57,6 +57,9 @@ export interface ForumDeps {
   notify(msg: string, tone: 'success' | 'danger' | 'neutral'): void
   shortKey(key: string): string
   fullKey(key: string): string
+  /** First run waits on the join card: called once it is settled, with
+   *  whether the person joined (false: they chose Not now). */
+  onJoinSettled?(joined: boolean): void
 }
 
 type Route = { page: 'top' } | { page: 'new' } | { page: 'item'; hash: string } | { page: 'submit' }
@@ -162,6 +165,7 @@ export function createForumPage(deps: ForumDeps): { root: HTMLElement; open(rout
       }
       state = r as ForumStateOut
       go({ page: 'top' })
+      deps.onJoinSettled?.(true)
     }
     btn.addEventListener('click', () => void submit())
     name.addEventListener('keydown', (e) => {
@@ -178,6 +182,7 @@ export function createForumPage(deps: ForumDeps): { root: HTMLElement; open(rout
         'Joining connects to the project’s relay, which learns your IP address. Your name, posts, comments and upvotes are public, signed by your key, and cannot be unsaid. After this, posting and voting go out without asking again.'
       ),
       btn,
+      link('Not now', () => deps.onJoinSettled?.(false), 'forum-join-later'),
       err
     )
     setTimeout(() => name.focus(), 0)

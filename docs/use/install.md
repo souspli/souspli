@@ -49,7 +49,12 @@ it. Read it; it is short and it is true:
   letter that you could not bear to leak. **A signed letter is public and permanent
   once shared.**
 
-Then Souspli opens onto a **welcome letter** — a real one, bundled with the app and
+Next comes the **community forum**: a page asking for a name, with what joining
+reveals written underneath. **Join** puts you in *Coffee Talk*, where you can post,
+comment and upvote straight away ([forums](forums.md)); **Not now** closes it, and the
+**Forum** button in the top bar brings it back. Then the question about update checks.
+
+Behind those, Souspli opens onto a **welcome letter** — a real one, bundled with the app and
 checked exactly like a letter from a stranger before it was shown. It is there so the
 first thing you see is what matters most: a letter below, and above it the header
 that tells you who signed it. It was signed by a key made for that one letter and
