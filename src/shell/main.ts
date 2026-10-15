@@ -1690,11 +1690,20 @@ app.whenReady().then(async () => {
     // A vote on a forum post belongs to that forum too, so the forum's relay
     // carries it and a per-forum subscription would see it.
     const inGroup = inGroupOf(targetHash)
-    const signed = await signStarter('starter:vote', 'vote', {
-      votesOn: targetHash,
-      dir: direction,
-      ...(inGroup ? { inGroup } : {})
-    })
+    // Strictly later than your previous vote on this, in whole seconds. Only
+    // the latest vote counts, and `created` is all a READER has to tell which
+    // is latest: here the tie is broken by arrival order, but a relay hands
+    // two votes signed in the same second to everyone else in no promised
+    // order, so an upvote taken back at once could come out as the one that
+    // stands. A second or two of future-dating is the cheaper lie.
+    const prevCreated = current ? (library.get(current.envelopeHash)?.created ?? 0) : 0
+    const created = Math.max(Math.floor(Date.now() / 1000), prevCreated + 1)
+    const signed = await signStarter(
+      'starter:vote',
+      'vote',
+      { votesOn: targetHash, dir: direction, ...(inGroup ? { inGroup } : {}) },
+      created
+    )
     if (!signed.envelopeHash) return { error: signed.error ?? 'could not sign the vote' }
     const shared = await shareInForum(signed.envelopeHash)
     return { ...voteFacts(targetHash), envelopeHash: signed.envelopeHash, shared }
@@ -1949,7 +1958,8 @@ app.whenReady().then(async () => {
   async function signStarter(
     starterKey: string,
     type: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    created?: number
   ): Promise<{ envelopeHash?: string; error?: string }> {
     const starter = starterByKey(starterKey)
     if (!starter) return { error: `the ${type} program is missing` }
@@ -1958,7 +1968,8 @@ app.whenReady().then(async () => {
       type,
       args: jsToCbor(args),
       attachments: new Map(),
-      enc: { e: NOSTR_ENC_SCHEME, ek: keyring.identity.nostrPubkey }
+      enc: { e: NOSTR_ENC_SCHEME, ek: keyring.identity.nostrPubkey },
+      ...(created !== undefined ? { created } : {})
     })
     const outcome = await ingestBytes(tar)
     if (outcome.status !== 'valid' || typeof outcome.envelopeHash !== 'string') {
