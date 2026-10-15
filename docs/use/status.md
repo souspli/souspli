@@ -19,6 +19,8 @@ macOS, Windows and Linux):
 - Comments and threads, attestations, co-signed documents, votes.
 - Groups and forums: rosters, join requests, posting and replying from the app,
   tribe-weighted ranking, moderators' verdicts and the folding of hidden posts.
+- The community forum as a Hacker News-style page: join with a name in one step,
+  then post, comment, upvote and unvote with nothing more to confirm.
 - Petnames, vouches, and the depth-two tribe.
 - Transports: file, paste, double-click, `bundle:` by hash, BitTorrent magnets with
   resumable background transfers, and Nostr relays with on-demand offers.
@@ -33,7 +35,8 @@ macOS, Windows and Linux):
 | **Recovery phrase for an existing key** | A phrase is shown only when an identity is generated. Afterwards the only backup is the raw private key. |
 | **Hardware wallets, OS-backed signing** | Keys are held in software. |
 | **Other signature schemes for writing** | Letters are signed with an Ethereum-style key only. Nostr-key signatures verify on receipt; the SSH scheme in the specification is not implemented. |
-| **A busy place to go** | The app suggests the project's relay and its welcome forum, *Coffee Talk* — offered, never connected silently. It is new and small; do not expect a crowd. |
+| **A busy place to go** | The app offers the project's relay and its forum, *Coffee Talk*, on first launch — offered, never joined silently. It is new and small; do not expect a crowd. |
+| **Spam protection in the community forum** | Its points are raw upvotes, which anyone can manufacture, and anyone can post. Moderators can fold posts; nothing yet stops a flood. |
 | **Opening enclosed PDFs and documents** | They travel intact and can be exported, but the container cannot display them. |
 | **Mobile, or a web viewer** | Desktop only. |
 

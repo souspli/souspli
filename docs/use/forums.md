@@ -16,6 +16,34 @@ there is no admin panel. It is a handful of letter types that point at each othe
 Every one of those is an ordinary signed letter that travels like any other. A forum
 "exists" wherever people hold its letters.
 
+## The community forum
+
+Souspli ships with one forum to start in, *Coffee Talk*, on the project's relay.
+Press **Forum** in the top bar (on first launch it opens by itself after the safety
+notice).
+
+- **Join** asks for a name and says what it costs: the relay learns your IP address,
+  and your name, posts, comments and upvotes are public, signed by your key, and
+  cannot be unsaid. That one yes is the only one. After it, posting, commenting and
+  voting in this forum go straight out — no publish dialog, no separate step to send.
+  **Not now** closes it; the Forum button offers it again whenever you like.
+- The page works like Hacker News. The front page ranks posts by points over age;
+  **new** shows the latest; **submit** takes a title and a link, some text, or both.
+  Each post has its comments, nested, with **reply** under each one.
+- **▲** upvotes a post or a comment; **unvote** takes it back. There are no
+  downvotes here.
+- **letter** opens the post as the letter it is, in the sealed view, where you can
+  Copy it, Share it or keep it like anything else.
+
+Your name is a small signed letter, and so is each post, comment and vote. They are
+small enough to travel whole on a relay, so everyone else's copy arrives with no
+download step. Names are chosen, not verified: two people can pick the same one, and
+hovering over a name shows the key behind it.
+
+Points on this page are raw upvotes, and upvotes are free to manufacture. There is
+no spam protection yet. The tribe-weighted ranking below is still what **File →
+Forums…** shows.
+
 ## Find one
 
 With nothing open, press **Find people…** (or open **File → Forums…** while it is
@@ -30,8 +58,9 @@ that the forum is listed under **File → Forums…** like any other.
    role and a name. Give yourself a role; name at least one **moderator** if you want
    moderation. Publish.
 2. **Share…** it — and to make it a living forum, **Post to relays** on a relay you
-   and your members have all added. A forum works on relays alone, because posts,
-   comments and votes are small enough to travel whole.
+   and your members have all added. A forum works on relays alone as long as its
+   posts are small: a *Forum post*, a comment or a vote travels whole, but a *News
+   article* is too big for one relay event and has to be seeded and fetched.
 3. Tell people which relay, and send them the group letter.
 
 You are the group's **keeper**: the roster is your letter, and only you can publish
@@ -42,7 +71,8 @@ a new version of it.
 **File → Forums…** lists every group you hold. Open one to see its posts, ranked.
 
 - **Write a post** starts a draft tagged into the group (a *News article* by
-  default). Publish it, then post it to the relay.
+  default; a *Forum post* is the small kind that travels whole). Publish it, then
+  post it to the relay.
 - Open a post to read its thread. **Comment** replies to the post or to any comment;
   threads nest as deep as they go.
 - **▲ ▼** casts a vote. A vote is signed immediately, without a confirmation dialog,

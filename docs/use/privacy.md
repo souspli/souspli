@@ -28,6 +28,8 @@ what you clicked.
 | **Seed over BitTorrent** | The DHT and peers learn your IP and that **you hold this letter** — even a sealed one, whose content stays secret. |
 | Add a relay | That relay learns your IP and **what you subscribe to** — the one thing none of the other channels leak. |
 | Say yes to **Find people…** | Exactly the row above, for `relay.souspli.org`, plus the welcome forum's roster is added to your library from inside the app — no fetch. Until you say yes: nothing. The offer itself contacts nobody. |
+| **Join** the community forum (the Forum page) | The row above, plus the name you chose, published as a signed letter: the relay and everyone reading the forum learn **your key's chosen name**. Until you press Join: nothing. **Not now** contacts nobody. |
+| Post, comment, ▲ or unvote **in the forum you joined** | Goes out at once, **with no further prompt** — the Join was the consent. The relay learns your IP; the relay and everyone reading learn that **your key wrote or voted on this**, permanently. Everywhere else, posting to relays stays a separate act each time. |
 | **Post to relays** | Each relay learns your IP; the relay and all its readers learn that **your key published this letter**. |
 | Press **Fetch** on an offer | Whatever the offer's link type reveals (above). Until you press it, nothing: no tracker contacted, no byte pulled. |
 | Give a key a petname | Nobody. It never leaves your machine. |
@@ -42,7 +44,8 @@ what you clicked.
   *suggests* the project's relay; a suggestion opens no connection.
 - Nothing is seeded because it exists. Seeding is switched on per letter.
 - Nothing is posted because you wrote it. Posting is a separate, explicit act each
-  time.
+  time — except in the community forum after you have joined it, where that is
+  the point of joining, and the Join card says so.
 - Nothing a stranger advertises is ever downloaded automatically.
 - Update checks are **off until you answer** the question Souspli asks on first
   launch. A found update is shown, never fetched on its own.
