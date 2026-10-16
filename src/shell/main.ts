@@ -941,6 +941,7 @@ app.whenReady().then(async () => {
       votesOn?: string
       inGroup?: string
       rollUp?: boolean
+      replies?: boolean
       limit?: number
     }
     return library.feed(q)

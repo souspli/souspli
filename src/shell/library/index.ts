@@ -45,6 +45,8 @@ export interface ThingRow {
   sealed: boolean
   read: boolean
   isFork: boolean
+  /** Only on a replies feed: the title of what this replies to, when held. */
+  replyToTitle?: string | null
   /** Only on a rolled-up feed: how much conversation sits under this thing.
    *  `replies` counts the whole subtree, not just direct answers, because
    *  "12 replies" on a thread that is 12 deep should not read as 1. */
@@ -124,6 +126,10 @@ export interface FeedQuery {
    *  than content, and a reply belongs under the thing it answers. Off by
    *  default so every existing caller keeps the flat list it asked for. */
   rollUp?: boolean
+  /** Only replies: things that claim to answer something, newest first, each
+   *  with the title of what it answers. The other half of rollUp -- the feed
+   *  folds replies away, and this is where they are listed on their own. */
+  replies?: boolean
   limit?: number
   offset?: number
 }
@@ -334,7 +340,8 @@ function toThingRow(r: Row): ThingRow {
     petname: (r as Row & { petname?: string | null }).petname ?? null,
     title: (r as Row & { title?: string | null }).title ?? null,
     signatures: (r as Row & { signatures?: number }).signatures ?? 1,
-    cosignable: ((r as Row & { cosignable?: number }).cosignable ?? 0) === 1
+    cosignable: ((r as Row & { cosignable?: number }).cosignable ?? 0) === 1,
+    replyToTitle: (r as Row & { reply_to_title?: string | null }).reply_to_title ?? null
   }
 }
 
@@ -1119,6 +1126,10 @@ export class Library {
         )`
       )
     }
+    if (query.replies) {
+      where.push(`t.type != 'vote'`)
+      where.push(`EXISTS (SELECT 1 FROM refs rq WHERE rq.envelope_hash = t.envelope_hash AND rq.rel = 'replyTo')`)
+    }
     const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
     const limit = query.limit ?? 200
     const offset = query.offset ?? 0
@@ -1127,7 +1138,9 @@ export class Library {
         `SELECT t.*, p.name AS petname,
                 (SELECT ti.title FROM titles ti WHERE ti.envelope_hash = t.envelope_hash) AS title,
                 (SELECT COUNT(*) FROM things t3 WHERE t3.manifest_hash = t.manifest_hash) AS signatures,
-                EXISTS (SELECT 1 FROM doc_signers d2 WHERE d2.manifest_hash = t.manifest_hash) AS cosignable
+                EXISTS (SELECT 1 FROM doc_signers d2 WHERE d2.manifest_hash = t.manifest_hash) AS cosignable,
+                (SELECT tp.title FROM refs rp JOIN titles tp ON tp.envelope_hash = rp.target_hash
+                  WHERE rp.envelope_hash = t.envelope_hash AND rp.rel = 'replyTo') AS reply_to_title
            FROM things t${join}
            LEFT JOIN petnames p ON p.author_scheme = t.author_scheme AND p.author_key = t.author_key
          ${clause} ORDER BY t.received_at DESC, t.rowid DESC LIMIT ? OFFSET ?`

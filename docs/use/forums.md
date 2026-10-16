@@ -144,3 +144,6 @@ A busy forum must not bury a memo from your boss. In the main feed a vote never 
 its own row, and a reply folds into the post it answers, which shows
 reply and vote counts instead. A reply to something you do not hold still shows
 on its own, because hiding it would hide your only copy.
+
+To see the comments themselves, press **Replies** beside **All** and **Mine**: every
+comment you hold, newest first, each with the title of what it answers.

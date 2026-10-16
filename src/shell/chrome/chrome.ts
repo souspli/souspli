@@ -162,6 +162,8 @@ interface ThingRow {
   /** Only on a rolled-up feed: what folded into this row — the whole reply
    *  subtree, and the votes cast on it. */
   activity?: { replies: number; up: number; down: number }
+  /** On the Replies list: the title of what this answers, when held. */
+  replyToTitle?: string | null
 }
 /** A thing a relay says exists that you do not hold — a draft in reverse.
  *  Everything here except the hash is the poster's CLAIM, and there is
@@ -1190,7 +1192,7 @@ let selected: string | null = null
  *  Used ONLY to label rows as yours — the comparison is on the admitted
  *  envelope's author key, so it says what the signature says. */
 let myAuthorKey: string | null = null
-let feedScope: 'all' | 'mine' = 'all'
+let feedScope: 'all' | 'mine' | 'replies' = 'all'
 
 /** Is this row signed by the identity currently loaded in this shell? */
 /** How an author is written, everywhere one appears.
@@ -1359,7 +1361,10 @@ function thingItem(row: ThingRow): HTMLElement {
     meta.append(el('span', undefined, ' · '), badge)
   }
   const called = titleLine(row.title)
-  item.append(line1, ...(called ? [called] : []), meta)
+  // On the Replies list, what it answers -- the target's own (sanitized) title.
+  const answers = row.replyToTitle ? el('div', 'sh-feed-meta sh-feed-re', `↳ re: ${row.replyToTitle}`) : null
+  answers?.setAttribute('data-testid', 'feed-reply-to')
+  item.append(line1, ...(called ? [called] : []), ...(answers ? [answers] : []), meta)
   item.addEventListener('click', () => void openThing(row.envelopeHash))
   return item
 }
@@ -1456,7 +1461,7 @@ function draftItem(d: DraftRow): HTMLElement {
  *  the set changes, truthfully. */
 function feedFilter(): HTMLElement {
   const wrap = el('span', 'sh-feed-filter')
-  const mk = (scope: 'all' | 'mine', label: string): HTMLElement => {
+  const mk = (scope: 'all' | 'mine' | 'replies', label: string): HTMLElement => {
     const b = el('button', 'evm-btn evm-btn--ghost evm-btn--sm sh-feed-filter-btn', label)
     b.setAttribute('data-testid', `feed-filter-${scope}`)
     if (feedScope === scope) b.classList.add('sh-feed-filter-btn--active')
@@ -1468,7 +1473,7 @@ function feedFilter(): HTMLElement {
     })
     return b
   }
-  wrap.append(mk('all', 'All'), mk('mine', 'Mine'))
+  wrap.append(mk('all', 'All'), mk('mine', 'Mine'), mk('replies', 'Replies'))
   return wrap
 }
 
@@ -1478,7 +1483,14 @@ async function refreshFeed(): Promise<void> {
   // Rolled up: a reply belongs under the thing it answers and a vote is
   // activity rather than content. Without this a busy forum thread would push
   // a memo addressed to you off the bottom of the list.
-  const query = feedScope === 'mine' && myAuthorKey ? { author: myAuthorKey, rollUp: true } : { rollUp: true }
+  // Replies is the other half: the comments the rolled-up feed folds away,
+  // as rows of their own, each saying what it answers.
+  const query =
+    feedScope === 'replies'
+      ? { replies: true }
+      : feedScope === 'mine' && myAuthorKey
+        ? { author: myAuthorKey, rollUp: true }
+        : { rollUp: true }
   const [drafts, rows, offers] = await Promise.all([shell.drafts(), shell.feed(query), shell.offers()])
   feedPane.replaceChildren()
   // Drafts are yours by definition and are never published, so the Mine/All
@@ -1501,12 +1513,17 @@ async function refreshFeed(): Promise<void> {
     for (const o of offers) feedPane.append(offerItem(o))
   }
   const head = el('div', 'sh-feed-title sh-feed-head')
-  head.append(el('span', undefined, `${feedScope === 'mine' ? 'By you' : 'Feed'} · ${rows.length}`), feedFilter())
+  head.append(
+    el('span', undefined, `${feedScope === 'mine' ? 'By you' : feedScope === 'replies' ? 'Replies' : 'Feed'} · ${rows.length}`),
+    feedFilter()
+  )
   feedPane.append(head)
   if (rows.length === 0) {
     const empty =
       feedScope === 'mine'
         ? 'Nothing published by you yet.'
+        : feedScope === 'replies'
+          ? 'No replies yet.'
         : drafts.length > 0
           ? 'Nothing published yet.'
           : 'Nothing yet. Press New to make something.'
