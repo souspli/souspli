@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs
 import { writeFile } from 'node:fs/promises'
 import { AdmissionService } from './admission/index.js'
 import { Keyring, KeyringLoadError } from './keyring/index.js'
+import { nodeContext, parseArgs, profilesDir, readPublicIdentity, runCommand } from './cli.js'
 import { ethAddressHex, generateMnemonic12, mnemonicToAccounts, validatePrivkeyHex } from './keyring/hd.js'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
@@ -102,6 +103,45 @@ app.commandLine.appendSwitch('disable-features', 'WebRtcHideLocalIpsWithMdns')
 // would land in differently-named directories depending on where it runs.
 app.setName('Souspli')
 
+// ── The command line (cli.ts) ────────────────────────────────────────────────
+// Read before anything else: a command (version, help, identity, profiles,
+// profile delete) prints and exits WITHOUT taking the single-instance lock
+// below, so it never wakes a running window; and --profile must move userData
+// before that lock is taken, because the lock is keyed on it -- which is what
+// lets two profiles run side by side while a second launch of the same one
+// still just brings its window forward.
+const DEFAULT_USER_DATA = app.getPath('userData')
+const cli = parseArgs(process.argv.slice(process.defaultApp ? 2 : 1))
+if (cli.command === 'gui' && cli.profile && process.env.SHELL_USER_DATA_DIR) {
+  cli.error = '--profile and SHELL_USER_DATA_DIR both choose a data folder; use one'
+}
+/** This launch is a command that prints and exits, never the app. */
+const CLI_ONLY = cli.error !== null || cli.command !== 'gui'
+/** The profile this window is running as, or null for the default one. */
+const PROFILE = CLI_ONLY ? null : cli.profile
+if (CLI_ONLY) {
+  void runCommand(cli, {
+    ...nodeContext(appVersion()),
+    defaultData: DEFAULT_USER_DATA,
+    // An identity made before identity.pub.json existed: decrypt it (the
+    // keychain needs the app ready), write the public file, and read that.
+    async recoverPublicIdentity(dir) {
+      await app.whenReady()
+      try {
+        const kr = Keyring.load(dir)
+        if (!kr) return null
+        kr.ensurePublic(dir)
+        return readPublicIdentity(dir)
+      } catch {
+        return null
+      }
+    }
+  }).then(
+    (code) => app.exit(code),
+    () => app.exit(1)
+  )
+}
+
 // Hermetic profile: when SHELL_USER_DATA_DIR is set (tests, alternate
 // profiles), move Electron's OWN userData there too. Otherwise the default
 // session's storage (e.g. the chrome's safety-ack localStorage) lands in the
@@ -109,6 +149,8 @@ app.setName('Souspli')
 // which made test outcomes depend on whether a human had ever clicked
 // "I understand" in some unrelated session.
 if (process.env.SHELL_USER_DATA_DIR) app.setPath('userData', process.env.SHELL_USER_DATA_DIR)
+// A named profile is the same move, to a folder of its own (cli.ts).
+if (PROFILE) app.setPath('userData', join(profilesDir(DEFAULT_USER_DATA), PROFILE))
 
 // Display scale. Ctrl+/- zoom is per-webContents, so it scales the trusted
 // chrome and the cage content independently and can never resize the app as a
@@ -180,8 +222,10 @@ if (process.env.SHELL_EXIT_LOG) {
   app.on('quit', () => recordQuit(quitReason))
 }
 
-const singleInstance = process.env.SHELL_ALLOW_MULTI === '1' || app.requestSingleInstanceLock()
-if (!singleInstance) {
+const singleInstance = CLI_ONLY || process.env.SHELL_ALLOW_MULTI === '1' || app.requestSingleInstanceLock()
+if (CLI_ONLY) {
+  // A command: no lock taken, nothing to hand over, nothing to open.
+} else if (!singleInstance) {
   // Another shell owns this profile: it has been handed our argv via
   // `second-instance` and will open the file. Leave immediately — two
   // processes on one SQLite library is the thing to avoid.
@@ -435,6 +479,9 @@ const dbg = (m: string): void => {
 process.on('unhandledRejection', (r) => dbg(`UNHANDLED REJECTION ${String(r)}`))
 
 app.whenReady().then(async () => {
+  // A command is running instead (see the top of this file); it may wait for
+  // ready to reach the keychain, but it never opens the app.
+  if (CLI_ONLY) return
   dbg('ready')
   installBridge()
 
@@ -460,11 +507,19 @@ app.whenReady().then(async () => {
     cb({ cancel: !(local || dev) })
   })
 
-  const userDataDir = process.env.SHELL_USER_DATA_DIR ?? app.getPath('userData')
+  // SHELL_USER_DATA_DIR and --profile were both applied with setPath above.
+  const userDataDir = app.getPath('userData')
   dbg('keyring')
   let keyring: Keyring
   try {
     keyring = Keyring.loadOrCreate(userDataDir)
+    // The public half in the clear, for `souspli identity` (cli.ts). Best
+    // effort: failing to write it must not stop the app.
+    try {
+      keyring.ensurePublic(userDataDir)
+    } catch {
+      /* the CLI will say to open the profile once */
+    }
   } catch (e) {
     // The identity file exists but is unreadable. NEVER silently regenerate —
     // the file (or a .bak sibling) may still be recoverable. Tell the human
@@ -527,7 +582,7 @@ app.whenReady().then(async () => {
   // ── Window + chrome ────────────────────────────────────────────────────────
   // 1280: the narrowest common laptop is 1366 wide, and at 1200 the per-letter
   // header -- 900px once the feed has its 300 -- overflowed for most letters.
-  const win = new BaseWindow({ width: 1280, height: 820, backgroundColor: '#08080a', title: 'Souspli' })
+  const win = new BaseWindow({ width: 1280, height: 820, backgroundColor: '#08080a', title: PROFILE ? `Souspli - ${PROFILE}` : 'Souspli' })
   const chrome = new WebContentsView({
     webPreferences: { preload: CHROME_PRELOAD, contextIsolation: true, sandbox: true, nodeIntegration: false }
   })

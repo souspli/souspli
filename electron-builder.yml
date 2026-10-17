@@ -99,6 +99,11 @@ win:
     - target: nsis
       arch: [x64]
   icon: build/icon.png
+  # souspli.cmd beside souspli.exe: the command line with its output on the
+  # console (a GUI .exe cannot print to cmd.exe). See build/win/souspli.cmd.
+  extraFiles:
+    - from: build/win/souspli.cmd
+      to: souspli.cmd
   files:
     - '!**/node_modules/**/prebuilds/{linux,darwin}-*/**'
   signtoolOptions:

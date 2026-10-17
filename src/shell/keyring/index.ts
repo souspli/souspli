@@ -22,6 +22,10 @@ import { nip44Decrypt, type Signer, type Unsealer } from '../../format/index.js'
 // hold the identity key.
 
 const IDENTITY_FILE = 'identity.key.enc'
+/** The PUBLIC half, in the clear beside the key, so `souspli identity` and
+ *  `souspli profiles` can say who a profile is without decrypting anything
+ *  (cli.ts). Public keys only: nothing here is a secret. */
+const PUBLIC_IDENTITY_FILE = 'identity.pub.json'
 const NOSTR_DERIVATION_MESSAGE = 'thing-nostr-derivation-v1'
 
 // At-rest encoding scheme markers (first byte of the identity file).
@@ -202,8 +206,33 @@ export class Keyring {
     const path = join(userDataDir, IDENTITY_FILE)
     if (existsSync(path)) copyFileSync(path, `${path}.bak-${Date.now()}`)
     const tmp = `${path}.tmp`
-    writeFileSync(tmp, encryptAtRest(toHex(privkey)))
+    const sealed = encryptAtRest(toHex(privkey))
+    writeFileSync(tmp, sealed)
     renameSync(tmp, path)
+    Keyring.writePublic(userDataDir, new Keyring(privkey).identity, sealed[0] === SCHEME_SAFE_STORAGE ? 'os' : 'software')
+  }
+
+  /** Write the public sidecar (see PUBLIC_IDENTITY_FILE). Atomic, like the key. */
+  static writePublic(userDataDir: string, id: PublicIdentity, storage: 'os' | 'software'): void {
+    const path = join(userDataDir, PUBLIC_IDENTITY_FILE)
+    const tmp = `${path}.tmp`
+    const body = { v: 1, scheme: 'eth-eip191', address: toHex(id.address), nostrPubkey: toHex(id.nostrPubkey), storage }
+    writeFileSync(tmp, `${JSON.stringify(body, null, 2)}\n`)
+    renameSync(tmp, path)
+  }
+
+  /** Write the public sidecar for a loaded identity if it is missing or stale:
+   *  identities made before it existed get one the next time the app opens. */
+  ensurePublic(userDataDir: string): void {
+    const path = join(userDataDir, PUBLIC_IDENTITY_FILE)
+    const want = toHex(this.identity.address)
+    try {
+      const have = JSON.parse(readFileSync(path, 'utf8')) as { address?: unknown; storage?: unknown }
+      if (have.address === want && have.storage === this.#storage) return
+    } catch {
+      /* missing or unreadable: write it */
+    }
+    Keyring.writePublic(userDataDir, this.identity, this.#storage)
   }
 
   private persist(userDataDir: string): void {
