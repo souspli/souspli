@@ -272,3 +272,25 @@ test('first run: the join card follows the safety notice, and "Not now" is remem
     await again.close()
   }
 })
+
+test('the feed folds comments away under All, and Replies lists them, each saying what it answers', async () => {
+  const rows = () =>
+    chromeEval<{ title: string; re: string | null }[]>(
+      alice,
+      `[...document.querySelectorAll('.sh-feed-item')].map((i) => ({ title: i.querySelector('.sh-feed-title-line, .sh-feed-called')?.textContent ?? i.textContent, re: i.querySelector('[data-testid=feed-reply-to]')?.textContent ?? null }))`
+    )
+  // All: the post, with its replies counted; no comment has a row of its own.
+  await chromeEval(alice, `document.querySelector('[data-testid=feed-filter-all]').click()`)
+  await expect.poll(async () => (await rows()).some((r) => r.title.includes('Hello from Alice')), { timeout: 10_000 }).toBe(true)
+  expect((await rows()).some((r) => r.re !== null), 'no reply rows under All').toBe(false)
+
+  // Replies: every comment Alice holds, newest first, each with what it answers
+  // -- including Carol's on her own post, which reached Alice over the relay.
+  await chromeEval(alice, `document.querySelector('[data-testid=feed-filter-replies]').click()`)
+  await expect
+    .poll(async () => (await rows()).map((r) => r.re), { timeout: 10_000 })
+    .toEqual(['↳ re: Carol was here', '↳ re: Welcome, Alice.', '↳ re: Hello from Alice'])
+  // No votes, names or posts in it.
+  expect(await chromeEval<string[]>(alice, `[...document.querySelectorAll('.sh-feed-item .evm-badge--neutral')].map((b) => b.textContent)`)).toEqual(['comment', 'comment', 'comment'])
+  await chromeEval(alice, `document.querySelector('[data-testid=feed-filter-all]').click()`)
+})
