@@ -42,7 +42,10 @@ function souspli(args: string[], input?: string, nodeMode = false): Promise<Ran>
     }, 30_000)
     child.on('close', (code) => {
       clearTimeout(timer)
-      resolve({ code, out, err })
+      // Windows: CRLF, and Electron's console attach can put a blank line
+      // first. Compare what was said, not how the platform framed it.
+      const norm = (t: string) => t.replace(/\r\n/g, '\n').replace(/^\n/, '')
+      resolve({ code, out: norm(out), err: norm(err) })
     })
     if (input !== undefined) child.stdin.end(input)
     else child.stdin.end()
@@ -91,14 +94,14 @@ test('profiles run side by side, each its own identity, title and folder; comman
 
     // identity prints the public keys, read without the keychain.
     const id = await souspli(['--profile', 'alice', 'identity'])
-    expect(id.code).toBe(0)
+    expect(id.code, id.err).toBe(0)
     expect(id.out).toContain('profile:  alice')
     expect(id.out.toLowerCase()).toContain(`address:  0x${a.address.toLowerCase()}`)
     expect(id.out).toContain(`nostr:    ${a.nostrPubkey}`)
 
     // profiles lists both, as running, with their short addresses.
     const list = await souspli(['profiles'])
-    expect(list.code).toBe(0)
+    expect(list.code, list.err).toBe(0)
     expect(list.out).toMatch(/^alice\s+0x\S+…\S+\s+\(running\)\nbob\s+0x\S+…\S+\s+\(running\)\n$/)
 
     // A command while a profile runs did not take its lock or close it.
@@ -129,15 +132,19 @@ test('profiles run side by side, each its own identity, title and folder; comman
 })
 
 test('the same commands without the app (souspli.cmd on Windows runs this way)', async () => {
-  const viaApp = await souspli(['--profile', 'bob', 'identity'])
-  const viaNode = await souspli(['--profile', 'bob', 'identity'], undefined, true)
-  expect(viaNode.code).toBe(0)
+  // A profile of its own, so this does not depend on the test above.
+  const carol = await launchShell({ profile: 'carol', extraEnv: env })
+  await carol.close()
+  const viaApp = await souspli(['--profile', 'carol', 'identity'])
+  expect(viaApp.code, viaApp.err).toBe(0)
+  const viaNode = await souspli(['--profile', 'carol', 'identity'], undefined, true)
+  expect(viaNode.code, viaNode.err).toBe(0)
   expect(viaNode.out).toBe(viaApp.out)
   expect((await souspli(['profiles'], undefined, true)).out).toBe((await souspli(['profiles'])).out)
   expect((await souspli(['version'], undefined, true)).out).toBe((await souspli(['version'])).out)
-  const del = await souspli(['profile', 'delete', 'bob', '--yes'], undefined, true)
-  expect(del.code).toBe(0)
-  expect(existsSync(join(profiles, 'bob'))).toBe(false)
+  const del = await souspli(['profile', 'delete', 'carol', '--yes'], undefined, true)
+  expect(del.code, del.err).toBe(0)
+  expect(existsSync(join(profiles, 'carol'))).toBe(false)
 })
 
 test('without a profile nothing mentions one', async () => {
