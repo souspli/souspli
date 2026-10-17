@@ -78,3 +78,25 @@ sent you.
 That directory holds your encrypted identity file, the library index, the
 content-addressed blob store and the bundles you are able to re-serve. Deleting it
 deletes your identity. [Back up your key first](identity.md).
+
+## From a terminal
+
+`souspli --help` lists what the command line does: print the version, print your
+public keys (`souspli identity`), and run more than one identity on the same
+machine with **profiles** — `souspli --profile alice` opens a separate Souspli with
+its own identity and letters, in a window titled *Souspli - alice*, beside any
+other. `souspli profiles` lists them; `souspli profile delete alice` deletes one
+after asking you to type its name. Profiles live in a `profiles` folder inside the
+directory above.
+
+Where `souspli` is:
+
+| | |
+|---|---|
+| Linux, `.deb` | `souspli`, on your PATH |
+| Linux, AppImage | the AppImage itself: `./Souspli-*.AppImage --help` |
+| macOS | `/Applications/Souspli.app/Contents/MacOS/Souspli` |
+| Windows | `souspli.cmd` in the install folder, `%LOCALAPPDATA%\Programs\Souspli` |
+
+On Windows use `souspli.cmd`, not `souspli.exe`: the `.exe` is a windowed program and
+cannot print to a console.

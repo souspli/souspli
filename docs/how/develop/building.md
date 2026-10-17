@@ -144,12 +144,33 @@ never downgrade.
 - **Apple Developer Program**: yearly membership. If it lapses, builds already
   notarized keep working, but new ones cannot be notarized.
 
+## Command line
+
+`src/shell/cli.ts` reads the arguments, for both entry points:
+
+- **`main.ts`**, at the very top (Linux, macOS, and `souspli.exe` run directly). A
+  command prints and exits *before* the single-instance lock, so it never wakes a
+  running window. `--profile <name>` moves `userData` to the profile's folder before
+  the lock is taken; the lock is keyed on that folder, so profiles run side by side
+  while a second launch of the same one still just brings its window forward.
+- **`cli-entry.ts`**, built to `out/main/shell/cli.js` and run by
+  `build/win/souspli.cmd` under `ELECTRON_RUN_AS_NODE`, which is how output reaches a
+  Windows console. With no command it exits 100 and the wrapper starts the app with
+  the same arguments, so there is one parser for every platform.
+
+Commands read public keys from `identity.pub.json`, which the keyring writes beside
+`identity.key.enc`; they never touch the keychain. An identity made before that file
+existed gets one the next time its profile is opened. Flags the parser does not know
+are ignored rather than refused: Chromium switches, an AppImage's `--no-sandbox`, a
+test harness's `--inspect` and macOS's `-psn_…` all arrive in argv.
+
 ## Environment variables
 
 | Variable | Effect |
 |---|---|
-| `SHELL_USER_DATA_DIR` | Use this directory as the whole profile. |
-| `SHELL_ALLOW_MULTI=1` | Skip the single-instance lock (several profiles at once). |
+| `SHELL_USER_DATA_DIR` | Use this directory as the whole profile. For people, `--profile` does this. |
+| `SHELL_PROFILES_DIR` | Where `--profile` keeps profiles (default: `profiles` in the app's data folder). Tests point it at a temp dir. |
+| `SHELL_ALLOW_MULTI=1` | Skip the single-instance lock. Not needed for profiles, which each have their own. |
 | `SHELL_SCALE` | Force the device scale factor (Linux defaults to 2). |
 | `SHELL_FORCE_SOFTWARE_KEYS=1` | Ignore the OS keychain. |
 | `SHELL_TORRENT_OFFLINE=1` | No DHT, trackers or local discovery. |

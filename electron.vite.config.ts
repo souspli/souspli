@@ -28,7 +28,9 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
           'shell/main': resolve(__dirname, 'src/shell/main.ts'),
-          'shell/admission-worker': resolve(__dirname, 'src/shell/admission/worker.ts')
+          'shell/admission-worker': resolve(__dirname, 'src/shell/admission/worker.ts'),
+          // The command line without the app, for souspli.cmd (cli-entry.ts).
+          'shell/cli': resolve(__dirname, 'src/shell/cli-entry.ts')
         },
         // CommonJS output. Electron loads a CJS main reliably.
         output: { format: 'cjs', entryFileNames: '[name].js' }

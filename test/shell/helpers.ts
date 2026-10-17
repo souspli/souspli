@@ -315,6 +315,9 @@ export interface ShellHandle {
 
 export interface ShellLaunchOptions {
   extraEnv?: Record<string, string>
+  /** Launch as `--profile <name>` instead of a temp SHELL_USER_DATA_DIR.
+   *  Requires extraEnv.SHELL_PROFILES_DIR, so no real profile is touched. */
+  profile?: string
 }
 
 /** Close an app WITHOUT closing it mid-boot.
@@ -449,7 +452,8 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
   // accessors — casBlobs(), scanUserData() — must look at THAT dir, not at a
   // temp dir we made and the app never used. We also must not delete a dir we
   // did not create: specs relaunch against theirs.
-  const suppliedDir = opts.extraEnv?.SHELL_USER_DATA_DIR
+  if (opts.profile && !opts.extraEnv?.SHELL_PROFILES_DIR) throw new Error('launchShell({ profile }) needs extraEnv.SHELL_PROFILES_DIR')
+  const suppliedDir = opts.profile ? join(opts.extraEnv!.SHELL_PROFILES_DIR!, opts.profile) : opts.extraEnv?.SHELL_USER_DATA_DIR
   const userDataDir = suppliedDir ?? mkdtempSync(join(tmpdir(), 'shell-userdata-'))
   const ownsDir = suppliedDir === undefined
   const env: Record<string, string> = { ...process.env } as Record<string, string>
@@ -482,6 +486,8 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
   // orphan the process, so specs relaunch explicitly instead.
   env.SHELL_NO_RELAUNCH = '1'
   Object.assign(env, opts.extraEnv ?? {})
+  // A profile chooses its own folder; SHELL_USER_DATA_DIR alongside is refused.
+  if (opts.profile) delete env.SHELL_USER_DATA_DIR
 
   // Electron occasionally dies during startup on CI runners (macOS
   // especially). A launch flake is not a product failure — retry a fresh
@@ -490,7 +496,7 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
   let launched: ElectronApplication | null = null
   let lastErr: unknown = null
   for (let attempt = 1; attempt <= 3 && !launched; attempt++) {
-    const candidate = await _electron.launch({ args: [SHELL_MAIN], env })
+    const candidate = await _electron.launch({ args: [SHELL_MAIN, ...(opts.profile ? ['--profile', opts.profile] : [])], env })
     try {
       await waitReady(candidate)
       launched = candidate
