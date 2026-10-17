@@ -120,9 +120,19 @@ const CLI_ONLY = cli.error !== null || cli.command !== 'gui'
 /** The profile this window is running as, or null for the default one. */
 const PROFILE = CLI_ONLY ? null : cli.profile
 if (CLI_ONLY) {
+  const base = nodeContext(appVersion())
   void runCommand(cli, {
-    ...nodeContext(appVersion()),
+    ...base,
     defaultData: DEFAULT_USER_DATA,
+    // On Windows a windowed .exe cannot read the console: a prompt here would
+    // wait for ever. souspli.cmd runs the command line where it can (cli.ts).
+    ask:
+      process.platform === 'win32'
+        ? async () => {
+            await base.writeErr('\nsouspli: cannot ask from souspli.exe; use souspli.cmd, or --yes.\n')
+            return ''
+          }
+        : base.ask,
     // An identity made before identity.pub.json existed: decrypt it (the
     // keychain needs the app ready), write the public file, and read that.
     async recoverPublicIdentity(dir) {

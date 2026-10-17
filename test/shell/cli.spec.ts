@@ -81,6 +81,7 @@ test('version and help print and exit; an unknown command is refused with the he
 })
 
 test('profiles run side by side, each its own identity, title and folder; commands never wake them', async () => {
+  test.setTimeout(90_000) // two app launches and a dozen command runs; Windows is slow at both
   const alice = await launchShell({ profile: 'alice', extraEnv: env })
   const bob = await launchShell({ profile: 'bob', extraEnv: env })
   try {
@@ -117,13 +118,21 @@ test('profiles run side by side, each its own identity, title and folder; comman
     await bob.close()
   }
 
-  // Closed, it can, but only by typing its name.
-  const wrong = await souspli(['profile', 'delete', 'alice'], 'alicia\n')
+  // Closed, it can, but only by typing its name. On Windows the prompt is
+  // answered through the node-mode entry (souspli.cmd): a windowed .exe cannot
+  // read the console, and says so rather than wait.
+  const viaCmd = process.platform === 'win32'
+  if (viaCmd) {
+    const exe = await souspli(['profile', 'delete', 'alice'], 'alice\n')
+    expect(exe.code).toBe(1)
+    expect(exe.err).toContain('use souspli.cmd')
+  }
+  const wrong = await souspli(['profile', 'delete', 'alice'], 'alicia\n', viaCmd)
   expect(wrong.code).toBe(1)
   expect(wrong.out).toContain('cannot be recovered')
   expect(wrong.out).toContain('Not deleted.')
   expect(existsSync(join(profiles, 'alice'))).toBe(true)
-  const right = await souspli(['profile', 'delete', 'alice'], 'alice\n')
+  const right = await souspli(['profile', 'delete', 'alice'], 'alice\n', viaCmd)
   expect(right.code).toBe(0)
   expect(right.out).toContain('Deleted profile "alice".')
   expect(existsSync(join(profiles, 'alice'))).toBe(false)
