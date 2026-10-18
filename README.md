@@ -36,7 +36,7 @@ accounts, no host, nothing to shut down.
 | **[Why](docs/why/index.md)** | What is wrong with the web's shape, and what a letter fixes. · [Compared with Nostr, Mastodon, IPFS, PGP…](docs/why/compared.md) · [A very old idea](docs/why/an-old-idea.md) |
 | **[Use](docs/use/index.md)** | [Install](docs/use/install.md) · [your first letter](docs/use/first-letter.md) · [sharing](docs/use/sharing.md) · [forums](docs/use/forums.md) · [contracts](docs/use/contracts.md) · [people and trust](docs/use/people.md) · [what leaks when](docs/use/privacy.md) |
 | **[How](docs/how/index.md)** | [The format specification](docs/how/protocol/spec.md) · [architecture](docs/how/architecture/overview.md) · [the sealed container](docs/how/architecture/container.md) · [security and threat model](docs/how/architecture/security.md) · [writing a type](docs/how/develop/writing-a-type.md) |
-| **[Next](docs/next/roadmap.md)** | Sealed authoring, key rotation, signed releases — and zero-knowledge membership, anonymous ballots, identity proofs. |
+| **[Next](docs/next/roadmap.md)** | Sealed authoring, key rotation, forums at scale — and zero-knowledge membership, anonymous ballots, identity proofs. |
 
 ## Try it
 
@@ -70,7 +70,7 @@ pnpm world open ada     # the real app, on a populated library
 | `samples/` | The sixteen built-in types, one HTML file each. |
 | `relay/` | relay.souspli.org: a small Nostr relay for letters, on Cloudflare Workers + one Durable Object. Standalone package. |
 | `site/` | souspli.org, built from `docs/`. Standalone package. |
-| `test/` | The escape battery, ~270 end-to-end tests against the real app, ~190 unit tests. |
+| `test/` | The escape battery, ~290 end-to-end tests against the real app, ~270 unit tests. |
 | `docs/` | Everything above. [`docs/design-notes/`](docs/design-notes/index.md) keeps the original build briefs as decision records. |
 
 The coverage badge counts the unit tests only. They cover the format closely

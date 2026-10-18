@@ -77,7 +77,7 @@ Cross-platform builds happen in CI: pushing a `v*` tag runs
 GitHub Release with the installers attached.
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
 `appId` (`org.souspli.app`) is the update and signing identity. Do not change it.
@@ -178,6 +178,7 @@ test harness's `--inspect` and macOS's `-psn_…` all arrive in argv.
 | `SHELL_WELCOME_FORUM_B64` | Stand-in for the bundled welcome-forum letter (base64; empty = none). |
 | `SHELL_NO_WELCOME=1` | Do not offer the first-run welcome letter (tests and scripted launches). |
 | `SHELL_NO_UPDATE_PROMPT=1` | Do not ask about update checks on first launch; checks stay off (tests). |
+| `SHELL_NO_JOIN_PROMPT=1` | Do not offer the community forum's join card on first launch (tests). |
 | `SHELL_UPDATE_FEED` | Check this URL (an electron-updater generic feed) instead of GitHub Releases; also lets an unpackaged build check. |
 | `SHELL_UPDATE_FIRST_CHECK_MS` | Delay before the first background check once checks are on (default 30 s). |
 | `SHELL_ENS_RPC` | Ethereum RPC endpoint for ENS (requires `viem`, which is not a dependency). |
