@@ -5,8 +5,8 @@ user guide on purpose: nothing here should surprise you after you have installed
 
 ## Solid
 
-Built, and covered by the automated suites (about 270 end-to-end tests against the
-real app, about 190 unit tests, 41 cross-implementation conformance vectors, on
+Built, and covered by the automated suites (about 290 end-to-end tests against the
+real app, about 270 unit tests, 41 cross-implementation conformance vectors, on
 macOS, Windows and Linux):
 
 - The **sealed container**: 49 escape attempts — network by every route, storage,
@@ -22,6 +22,11 @@ macOS, Windows and Linux):
 - The community forum as a Hacker News-style page: join with a name in one step,
   then post, comment, upvote and unvote with nothing more to confirm.
 - Petnames, vouches, and the depth-two tribe.
+- Signed installers: notarized for macOS (Apple Silicon and Intel), signed for
+  Windows. Updates are offered in the app, checked only if you agree, and
+  downloaded and installed only when you say so.
+- A [command line](install.md#from-a-terminal): version, your public keys, and
+  profiles — several identities side by side on one machine.
 - Transports: file, paste, double-click, `bundle:` by hash, BitTorrent magnets with
   resumable background transfers, and Nostr relays with on-demand offers.
 

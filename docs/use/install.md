@@ -13,8 +13,7 @@ Installers are attached to each release at
 | Windows | `Souspli-<version>-win-x64.exe` |
 | Linux | `Souspli-<version>-linux-<arch>.AppImage`, or the `.deb` |
 
-If no release is listed yet, [build it from source](../how/develop/building.md) — it
-is three commands.
+Or [build it from source](../how/develop/building.md) — it is three commands.
 
 ## Installing
 

@@ -5,7 +5,7 @@ letter names its type by hash, so given a letter you know exactly which program 
 meant to show it, and no other program can claim it. Souspli labels a letter from
 that hash — never from what the letter says about itself.
 
-Fifteen types are built in. Press **New** to start any of them. The list also
+Sixteen types are built in. Press **New** to start any of them. The list also
 offers every type already in your library, so receiving a letter of a new type gives
 you the ability to write one.
 
@@ -19,7 +19,8 @@ you the ability to write one.
 | **Invitation** | An event. The date is stored as data and shown in each reader's own locale. |
 | **Contact card** | Name, role, organisation and how to reach you. Shows only the fields you filled. |
 | **To-do list** | A titled checklist. Ticking something off is an edit, made real by publishing. |
-| **Name tag** | A name, in big letters. The smallest possible type — a good one to read the source of. |
+| **Name tag** | A name, in big letters. The smallest possible type — a good one to read the source of. Also how you name yourself in the [community forum](forums.md#the-community-forum). |
+| **Forum post** | A title, and a link or some text. Small enough to travel whole on a relay; what **submit** makes in the [community forum](forums.md#the-community-forum). |
 
 ## Agreements and money
 

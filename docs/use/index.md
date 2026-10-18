@@ -9,18 +9,21 @@ page rather than hidden.
 | Get it running | [Install](install.md) |
 | Write something and sign it | [Your first letter](first-letter.md) |
 | Get a letter to someone — by file, paste, torrent or relay | [Sharing](sharing.md) |
+| Talk with other people using Souspli, right away | [The community forum](forums.md#the-community-forum) |
 | Start a club or a forum with no server | [Forums and groups](forums.md) |
 | Sign a document together, amend it, vouch for its accuracy | [Contracts, versions, attestations](contracts.md) |
 | See what kinds of letter are built in | [Types](types.md) |
 | Decide whose opinion counts | [People, vouches and your tribe](people.md) |
 | Understand your key and back it up | [Identity and keys](identity.md) |
 | Know exactly what each action reveals, and to whom | [What leaks when](privacy.md) |
+| Run more than one identity, or use it from a terminal | [From a terminal](install.md#from-a-terminal) |
 
 ## The five-minute tour
 
 1. **Install and open it.** On first run Souspli creates an identity — a key that
-   lives on your machine — and opens a welcome letter. There is no sign-up because
-   there is nobody to sign up with.
+   lives on your machine. There is no sign-up because there is nobody to sign up
+   with. It offers the community forum (pick a name to join, or *Not now*), and
+   behind that is a welcome letter.
 2. **Press New → Memo.** Fill it in under *Edit*, flip to *View* to see exactly what
    will be signed, press **Publish**, and confirm. You now hold a signed letter.
 3. **Press Share… → Save as file…** and send the `.thing` file to a friend by any
