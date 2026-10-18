@@ -427,10 +427,16 @@ export function createForumPage(deps: ForumDeps): { root: HTMLElement; open(rout
 
   // ── Rendering ──────────────────────────────────────────────────────────────
 
+  const typing = (): boolean =>
+    [...root.querySelectorAll('textarea, input')].some((f) => (f as HTMLInputElement).value.trim() !== '')
+
   let rendering = 0
-  async function render(): Promise<void> {
+  /** `background`: a live update nobody asked for. It may not replace a page
+   *  someone has started typing into -- checked again just before the swap,
+   *  because typing can start while the new page is still being fetched. */
+  async function render(opts: { background?: boolean } = {}): Promise<void> {
     const mine = ++rendering
-    stale = false
+    if (!opts.background) stale = false
     state = (await shell.forumState()) as ForumStateOut
     let content: HTMLElement
     if (!state.joined) content = joinPage()
@@ -438,6 +444,12 @@ export function createForumPage(deps: ForumDeps): { root: HTMLElement; open(rout
     else if (route.page === 'submit') content = submitPage()
     else content = await listPage(route.page)
     if (mine !== rendering) return // a newer render started while this one awaited
+    if (opts.background && typing()) {
+      stale = true
+      renderBar()
+      return
+    }
+    stale = false
     renderBar()
     body.replaceChildren(content)
     root.dataset.page = state.joined ? route.page : 'join'
@@ -452,11 +464,10 @@ export function createForumPage(deps: ForumDeps): { root: HTMLElement; open(rout
     if (pending) clearTimeout(pending)
     pending = setTimeout(() => {
       pending = null
-      const typing = [...root.querySelectorAll('textarea, input')].some((f) => (f as HTMLInputElement).value.trim() !== '')
-      if (typing) {
+      if (typing()) {
         stale = true
         renderBar()
-      } else void render()
+      } else void render({ background: true })
     }, 400)
   }
 
