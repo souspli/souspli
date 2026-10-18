@@ -294,3 +294,24 @@ test('the feed folds comments away under All, and Replies lists them, each sayin
   expect(await chromeEval<string[]>(alice, `[...document.querySelectorAll('.sh-feed-item .evm-badge--neutral')].map((b) => b.textContent)`)).toEqual(['comment', 'comment', 'comment'])
   await chromeEval(alice, `document.querySelector('[data-testid=feed-filter-all]').click()`)
 })
+
+test('a live update never wipes a half-written comment; it waits behind "new activity"', async () => {
+  const post = await call<Record<string, unknown>>(alice, `window.shell.forumSubmit({ kind: 'post', title: 'Typing in progress' })`)
+  const hash = JSON.stringify(String(post.envelopeHash))
+  await chromeEval(alice, `window.__shellChrome.openForumPage({ page: 'item', hash: ${hash} })`)
+  await expect.poll(() => chromeEval<string | null>(alice, `document.querySelector('[data-testid=forum-page]').dataset.page`), { timeout: 10_000 }).toBe('item')
+  await chromeEval(alice, `(() => { const t = document.querySelector('[data-testid=forum-comment-text]'); t.value = 'half a thought'; })()`)
+
+  // Bob comments; it reaches Alice while she is mid-sentence.
+  await expect.poll(async () => (await call<{ rows: Row[] }>(bob, `window.shell.forumFront('new')`)).rows.some((r) => r.title === 'Typing in progress'), { timeout: 20_000 }).toBe(true)
+  await call(bob, `window.shell.forumSubmit({ kind: 'comment', replyTo: ${hash}, body: 'Arrived while you typed.' })`)
+  await expect.poll(() => chromeEval<boolean>(alice, `!!document.querySelector('[data-testid=forum-stale]')`), { timeout: 20_000 }).toBe(true)
+  expect(await chromeEval<string>(alice, `document.querySelector('[data-testid=forum-comment-text]').value`)).toBe('half a thought')
+
+  // Asked for, the news appears.
+  await chromeEval(alice, `document.querySelector('[data-testid=forum-stale]').click()`)
+  await expect
+    .poll(() => chromeEval<string[]>(alice, `[...document.querySelectorAll('[data-testid=forum-comment-body]')].map((e) => e.textContent)`), { timeout: 10_000 })
+    .toEqual(['Arrived while you typed.'])
+  await chromeEval(alice, `window.__shellChrome.closeForumPage()`)
+})
