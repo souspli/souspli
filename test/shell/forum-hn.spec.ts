@@ -184,9 +184,18 @@ test('a new person, clicking: Forum → name → Join → submit → comment →
     await capture('2-front')
     // Bob upvoted Alice's post and took it back within the same second. A third
     // reader, getting both from the relay in whatever order, still sees 0.
-    expect(
-      await chromeEval<string>(carol, `[...document.querySelectorAll('[data-testid=forum-row]')].find((r) => r.textContent.includes('Hello from Alice')).querySelector('.hn-points').textContent`)
-    ).toBe('0 points')
+    // Polled: the relay hands Carol the forum a few letters at a time, so the
+    // front page can have rows before it has this one (it did, on Windows).
+    await expect
+      .poll(
+        () =>
+          chromeEval<string | null>(
+            carol,
+            `[...document.querySelectorAll('[data-testid=forum-row]')].find((r) => r.textContent.includes('Hello from Alice'))?.querySelector('.hn-points')?.textContent ?? null`
+          ),
+        { timeout: 20_000 }
+      )
+      .toBe('0 points')
 
     // 4–7. submit → title → text → submit. Lands on "new" with the post on top.
     await act(() => click('[data-testid=forum-nav-submit]'))
