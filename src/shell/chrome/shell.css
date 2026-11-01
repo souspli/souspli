@@ -949,3 +949,7 @@ body {
   color: var(--evm-danger);
   font-size: 12px;
 }
+
+/* Confirm: also send a private letter through the relays. */
+.sh-confirm-send { display: flex; align-items: center; gap: var(--evm-space-2); color: var(--evm-text-1); margin-top: var(--evm-space-3); }
+.sh-confirm-send-note { margin-top: var(--evm-space-1); }

@@ -42,8 +42,44 @@ have established meanings over *Nostr* ids. Letter hashes are a different namesp
 - A larger letter is posted as a **pointer**: `content` is empty, `x` names the hash
   and `thing-fetch` carries a locator. Posting one requires the letter to be seeded
   first — a locator is only honest if something is serving it.
-- Sealed letters are never posted. The content would stay encrypted; the fact of it
-  would not.
+- A sealed letter is posted differently: see below. It is always inline, never a
+  pointer, so anything over the cap travels as a file.
+
+## Sealed letters
+
+A sealed letter hides its author and recipients. Posted the ordinary way, the event
+would give back what the seal hides: the poster's key, the letter's type, its
+envelope hash, and what it replies to. So it travels in an event that says as
+little as possible:
+
+```jsonc
+{
+  "kind": 3400,
+  "pubkey": "<a key made for this one event, then discarded>",
+  "content": "<base64 sealed bundle>",
+  "tags": [
+    ["t", "thing"],
+    ["x", "<sha256 of the sealed bundle bytes>"],   // NOT an envelope hash
+    ["thing-type", "sealed"]
+  ]
+}
+```
+
+- **The key is used once.** Two sealed letters from the same person can't be linked
+  by their events.
+- **`x` is the hash of the ciphertext.** Sealing draws fresh random keys every time,
+  so this hash reveals nothing about the letter, and two copies of the same letter
+  don't share it. A reader checks that the bytes hash to `x`, then admits them like
+  any other bundle.
+- **There are no other tags.** No type, forum or reply. A reader ignores any other
+  tag on a `sealed` event.
+- **It is never a pointer.** A magnet is served from the sender's address, which is
+  exactly what this is meant to hide.
+
+Every reader receives every sealed letter and tries to open it. This is the cost of
+not listing recipients. A letter that isn't for the reader is dropped without a
+trace: no row, no log entry, nothing in the feed. Nothing is recorded as "offered
+by" for a sealed event, because its poster is nobody.
 
 ## Who posted is not who wrote
 

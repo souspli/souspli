@@ -53,8 +53,7 @@ relays.
 - **Share… → Post to relays** hands the letter to every relay on your list.
 - Small letters (up to 32 KiB) travel whole. Larger ones are posted as a *pointer*
   — a hash and a magnet link — so you must be seeding it first.
-- Sealed letters are refused: the content would stay secret but the fact of it would
-  not.
+- Sealed letters go differently: see [Private letters](#private-letters).
 
 On the receiving side, letters posted to relays you subscribe to arrive in your feed
 after passing the same checks as any file. A pointer arrives as an **offer**: a row
@@ -89,9 +88,16 @@ big it is.
 
 To write one, add people in the **To** row of **New** (or press **Write
 privately…** in People), then publish as usual. How to choose recipients is in
-[People](people.md#writing-privately). Then hand the file on the way you would any
-other: **Share → Save as file** or **Copy bundle**. Posting a sealed letter to
-relays isn't available yet.
+[People](people.md#writing-privately). If you have relays, the confirm offers to **send it
+through them anonymously**, and the box starts ticked. You can also send it later
+with **Share → Send privately to relays**. Or hand the file on the way you would any
+other: **Share → Save as file** or **Copy bundle**.
+
+*Sending privately reveals:* each relay learns your IP address, the time, and that
+an encrypted letter of about this size was posted. It doesn't learn who wrote it or
+who it's for: it's posted under a key made for that one post, and the event names
+nothing else. Every reader's app receives it and tries to open it, and only the
+recipients can. A letter over 32 KiB can't go this way, and must travel as a file.
 
 When you open one, it's decrypted into memory only. Nothing in the clear is written
 to disk. After a restart, Souspli decrypts it again from the sealed file it arrived

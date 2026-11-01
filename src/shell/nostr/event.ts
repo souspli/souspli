@@ -1,4 +1,4 @@
-import { schnorr } from '@noble/curves/secp256k1.js'
+import { schnorr, secp256k1 } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { fromHex, toHex } from '../../format/index.js'
 
@@ -100,6 +100,42 @@ export async function buildThingEvent(
   const id = eventId(unsigned)
   const sig = toHex(await schnorr.sign(fromHex(id), nostrPrivkey))
   return { ...unsigned, id, sig }
+}
+
+/** The `thing-type` of an event carrying a SEALED letter. Nothing else about
+ *  the letter is said: its real type is inside the ciphertext. */
+export const SEALED_TYPE = 'sealed'
+
+/** Build an event carrying a sealed letter, signed by a key made for this one
+ *  event and then forgotten.
+ *
+ *  Posting under your own nostr key would undo the seal's best property:
+ *  outsiders cannot see who wrote a sealed letter, but they could see who
+ *  POSTED it. So the event says only what the relay needs to carry it -- the
+ *  topic, the hash of these exact (encrypted) bytes, and that it is sealed. No
+ *  envelope hash, no type, no reply or forum tags: each would be a fact about
+ *  the letter, and the hash of the ciphertext is different every time anything
+ *  is sealed, so it says nothing about what is inside. */
+export async function buildSealedEvent(tar: Uint8Array, createdAt: number): Promise<NostrEvent> {
+  const oneTime = secp256k1.utils.randomSecretKey()
+  try {
+    const unsigned = {
+      pubkey: toHex(schnorr.getPublicKey(oneTime)),
+      created_at: createdAt,
+      kind: THING_KIND,
+      tags: [
+        [TAG.topic, 'thing'],
+        [TAG.hash, toHex(sha256(tar))],
+        [TAG.type, SEALED_TYPE]
+      ],
+      content: base64(tar)
+    }
+    const id = eventId(unsigned)
+    const sig = toHex(await schnorr.sign(fromHex(id), oneTime))
+    return { ...unsigned, id, sig }
+  } finally {
+    oneTime.fill(0)
+  }
 }
 
 export interface ParsedThingEvent {

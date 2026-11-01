@@ -31,6 +31,7 @@ what you clicked.
 | **Join** the community forum (the Forum page) | The row above, plus the name you chose, published as a signed letter: the relay and everyone reading the forum learn **your key's chosen name**. Until you press Join: nothing. **Not now** contacts nobody. |
 | Post, comment, ▲ or unvote **in the forum you joined** | Goes out at once, **with no further prompt** — the Join was the consent. The relay learns your IP; the relay and everyone reading learn that **your key wrote or voted on this**, permanently. Everywhere else, posting to relays stays a separate act each time. |
 | **Post to relays** | Each relay learns your IP; the relay and all its readers learn that **your key published this letter**. |
+| **Send privately to relays** (or the box in the confirm when you seal a letter) | Each relay learns your IP, the time, and that **an encrypted letter of about this size** was posted. It doesn't learn who wrote it or who it's for. The post uses a key made for it alone. Everyone reading the relay receives it; only the recipients can open it. |
 | Press **Fetch** on an offer | Whatever the offer's link type reveals (above). Until you press it, nothing: no tracker contacted, no byte pulled. |
 | Give a key a petname | Nobody. It never leaves your machine. |
 | Publish a **vouch** | Everyone who receives it learns **you know that key**. It discloses your social graph, permanently. |

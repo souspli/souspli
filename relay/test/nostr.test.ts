@@ -31,6 +31,22 @@ describe('what counts as a genuine event', () => {
     expect(verifyEvent(ev)).toBe(true)
   })
 
+  it('accepts the sealed-letter event the app posts: a one-time key, three tags, nothing else', () => {
+    const oneTime = schnorr.utils.randomSecretKey()
+    const base = {
+      pubkey: hex(schnorr.getPublicKey(oneTime)),
+      created_at: NOW,
+      kind: THING_KIND,
+      tags: [['t', 'thing'], ['x', 'cd'.repeat(32)], ['thing-type', 'sealed']],
+      content: 'AAAA'
+    }
+    const id = eventId(base)
+    const ev = { ...base, id, sig: hex(schnorr.sign(unhex(id), oneTime)) }
+    expect(shapeError(ev)).toBeNull()
+    expect(policyError(ev, policy, NOW)).toBeNull()
+    expect(verifyEvent(ev)).toBe(true)
+  })
+
   it('refuses an id that is not the hash, and a signature by another key', () => {
     const ev = sign()
     expect(verifyEvent({ ...ev, content: 'BBBB' })).toBe(false) // id no longer the hash

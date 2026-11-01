@@ -73,6 +73,21 @@ fetched letter is validly signed but is not the one advertised; a resolver that
 points a name at the wrong key. Plus the negative properties: nothing is *posted*
 unasked, and nothing is *fetched* unasked.
 
+### A sealed letter sent through a relay does not name its sender
+
+It is posted under a key generated for that one event and then discarded. The event
+carries only the topic, the hash of the ciphertext and the word `sealed`
+([relay event](../protocol/relay-event.md#sealed-letters)). Tested from the relay's
+side: the poster is neither the sender's key nor the recipient's, the tags are
+exactly those three, and neither the words nor either of the sender's keys appear in
+the bytes.
+
+A reader checks that the bytes are what `x` says before anything else. It refuses a
+public letter dressed as sealed, and keeps no trace of one that isn't for it. What
+the relay does learn is the sender's IP address and the time, which no event format
+can hide. Each sealed event costs every reader one trial decryption per slot, capped
+at 512 slots.
+
 ### Private material stays off disk
 
 The private key never appears on disk in plaintext; a sealed letter's decrypted

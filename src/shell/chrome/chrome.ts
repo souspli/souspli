@@ -110,7 +110,7 @@ interface ShellApi extends ForumApi {
   deleteDraft(id: string): Promise<{ deleted: boolean }>
   onFeedChanged(cb: () => void): void
   onConfirmRequest(cb: (req: { id: number; kind: string; summary: Record<string, unknown> }) => void): void
-  respondConfirm(id: number, approved: boolean): void
+  respondConfirm(id: number, approved: boolean, opts?: { sendToRelays?: boolean }): void
   onPublishResult(cb: (outcome: Record<string, unknown>) => void): void
   updateStatus(): Promise<UpdateStatus>
   updateCheck(): Promise<UpdateStatus>
@@ -1781,7 +1781,7 @@ function renderModeToggle(): HTMLElement {
  *  machines today. Save writes the same bytes to a .thing file. Both hand over
  *  the ORIGINAL admitted bundle, so the thing keeps its author, its signature
  *  and its hash wherever it lands. */
-function openShareModal(envelopeHash: string, type: string): void {
+function openShareModal(envelopeHash: string, type: string, sealed = false): void {
   const overlay = el('div', 'evm-modal-overlay')
   const modal = el('div', 'evm-modal sh-share')
   modal.setAttribute('data-testid', 'share-modal')
@@ -1900,14 +1900,19 @@ function openShareModal(envelopeHash: string, type: string): void {
   // people who never asked. Same rule as seeding: say what it means before the
   // control, and do nothing until asked.
   const relayRow = el('div', 'sh-share-row sh-share-row--relay')
-  const relayBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Post to relays') as HTMLButtonElement
+  const relayBtn = el(
+    'button',
+    'evm-btn evm-btn--secondary evm-btn--sm',
+    sealed ? 'Send privately to relays' : 'Post to relays'
+  ) as HTMLButtonElement
   relayBtn.setAttribute('data-testid', 'share-relay-post')
   const relayNote = el('div', 'sh-hint sh-share-note')
   relayNote.setAttribute('data-testid', 'share-relay-note')
   relayNote.textContent = 'Checking…'
   const relayWarn = el('p', 'sh-share-warn')
-  relayWarn.textContent =
-    'Posting hands this letter to every relay you have added, for anyone reading them. The bundle is unchanged and still signed by you — but the relay learns your address, and its readers learn that your key published this.'
+  relayWarn.textContent = sealed
+    ? 'Sends the sealed letter to every relay you have added, under a key made for this one post. The relay learns your IP address and that an encrypted letter of about this size was posted — not who wrote it or who it is for. Only its recipients can open it, and any of them can forward it.'
+    : 'Posting hands this letter to every relay you have added, for anyone reading them. The bundle is unchanged and still signed by you — but the relay learns your address, and its readers learn that your key published this.'
   relayBtn.addEventListener('click', async () => {
     relayBtn.disabled = true
     relayNote.textContent = 'Posting…'
@@ -1921,7 +1926,7 @@ function openShareModal(envelopeHash: string, type: string): void {
       relayNote.textContent =
         n === 0
           ? 'No relay took it — none are connected right now.'
-          : `Posted to ${n === 1 ? '1 relay' : `${n} relays`}${r.inline === false ? ', as a link to the bundle' : ''}.`
+          : `${r.sealed === true ? 'Sent privately' : 'Posted'} to ${n === 1 ? '1 relay' : `${n} relays`}${r.inline === false ? ', as a link to the bundle' : ''}.`
     } finally {
       relayBtn.disabled = false
     }
@@ -3414,7 +3419,7 @@ function renderHeader(h: HeaderFacts | null): void {
   const exportBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Share\u2026')
   if (h.draft) exportBtn.style.display = 'none' // nothing signed to hand over yet
   exportBtn.setAttribute('data-testid', 'header-export')
-  exportBtn.addEventListener('click', () => openShareModal(h.envelopeHash, h.type))
+  exportBtn.addEventListener('click', () => openShareModal(h.envelopeHash, h.type, h.sealed))
   const delBtn = el('button', 'evm-btn evm-btn--danger evm-btn--sm', h.draft ? 'Discard' : 'Delete')
   delBtn.setAttribute('data-testid', 'header-delete')
   delBtn.addEventListener('click', () => void deleteWithConfirm(h.envelopeHash, h.type, h.draft === true))
@@ -3933,7 +3938,28 @@ shell.onConfirmRequest((req) => {
     box.append(fwd)
     body.append(box)
   }
+  // Sending it on, too, when there is anywhere to send it. Ticked: delivery
+  // is what writing to someone is for, and what it reveals is said right here.
+  let sendToRelays: HTMLInputElement | null = null
+  const relayCount = Number(req.summary.relayCount ?? 0)
+  if (req.kind === 'publish' && to.length > 0 && relayCount > 0) {
+    const row = el('label', 'sh-confirm-send')
+    sendToRelays = el('input') as HTMLInputElement
+    sendToRelays.type = 'checkbox'
+    sendToRelays.checked = true
+    sendToRelays.setAttribute('data-testid', 'confirm-send-relays')
+    row.append(sendToRelays, ` Also send it through your ${relayCount === 1 ? 'relay' : `${relayCount} relays`}, anonymously`)
+    body.append(
+      row,
+      el(
+        'p',
+        'sh-hint sh-confirm-send-note',
+        'Posted under a key made for this one letter. The relay learns your IP address and that an encrypted letter of about this size was posted — not who wrote it or who it is for. Every reader’s app tries to open it; only the people above can.'
+      )
+    )
+  }
   const shown = { ...req.summary }
+  delete shown.relayCount
   if (to.length === 0) delete shown.recipients
   const pre = el('pre', 'sh-draft') as HTMLPreElement
   pre.textContent = JSON.stringify(shown, null, 2)
@@ -3944,7 +3970,7 @@ shell.onConfirmRequest((req) => {
   const ok = el('button', 'evm-btn evm-btn--primary', `Approve ${req.kind}`)
   ok.setAttribute('data-testid', 'confirm-approve')
   const closeModal = (approved: boolean): void => {
-    shell.respondConfirm(req.id, approved)
+    shell.respondConfirm(req.id, approved, { sendToRelays: sendToRelays?.checked === true })
     overlay.remove()
   }
   cancel.addEventListener('click', () => closeModal(false))
@@ -4062,7 +4088,15 @@ shell.onModeChanged((p) => {
 })
 shell.onPublishResult((o) => {
   if (o.status === 'valid') {
-    showText('Published to your feed', 'success')
+    const sent = o.relaySend as Record<string, unknown> | undefined
+    if (sent?.error) showText(`Sealed, but not sent: ${String(sent.error)}`, 'danger')
+    else if (sent) {
+      const n = Number(sent.posted ?? 0)
+      showText(
+        n === 0 ? 'Sealed. No relay is connected, so nothing was sent.' : `Sealed and sent to ${n === 1 ? '1 relay' : `${n} relays`}`,
+        n === 0 ? 'danger' : 'success'
+      )
+    } else showText(o.sealed === true ? 'Sealed. It is in your feed; send it on from Share.' : 'Published to your feed', 'success')
     // The draft was consumed — land on the signed instance, which really is
     // "✓ signed" (the draft's own header said DRAFT).
     //

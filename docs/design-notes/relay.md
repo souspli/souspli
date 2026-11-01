@@ -152,7 +152,9 @@ bound what it costs to *offer* junk.
 **Nothing reaches a relay by default.** The relay list starts empty, and posting
 is a separate explicit act (Share → Post to relays). A memo to your boss never
 touches a relay. A sealed thing is refused outright: it would stay encrypted, but
-the fact of it would not.
+the fact of it would not. *(Since then: sealed letters can be sent, under a
+one-time key and with nothing but the ciphertext's hash in the tags. See
+[the relay event](../how/protocol/relay-event.md#sealed-letters).)*
 
 Two disclosures, in the register seeding and fetching already use:
 

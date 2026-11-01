@@ -10,7 +10,7 @@ Nothing here is a promise or has a date.
 
 | | Why it matters |
 |---|---|
-| **Private letters through relays** | Sealed letters can be written and passed on as files. Next is posting them to relays without revealing who sent them: a one-time key per post, and nothing in the tags but the ciphertext's own hash. |
+| **Private letters without the IP** | A sealed letter sent through a relay hides who wrote it and who it's for, but not the sender's IP address. Routing the post through Tor or a mixnet would hide that too. Also, every reader receives every sealed letter. Past a certain volume that needs a recipient hint that doesn't name anyone. |
 | **Forums per subscription** | The app asks a relay for *every* letter posted there. On a busy public relay that is too much: subscribe per forum, and let people choose which. |
 | **Spam resistance for open forums** | The community forum ranks by raw upvotes and lets anyone post, so a flood of throwaway keys would drown it. The tribe-weighted ranking already resists that; the open forum needs something of its own that does not ask a newcomer to have vouched for anyone first. |
 | **Key rotation and revocation** | The largest gap in the design. Likely a signed, chained statement from the old key naming its successor, discoverable the same way new versions are. |
