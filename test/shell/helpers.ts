@@ -10,8 +10,7 @@ import {
   encodeEnvelope,
   hash,
   seal,
-  sealEnvelope,
-  sealMember,
+  buildSealedBundle as formatBuildSealedBundle,
   parseBundle,
   cosignBundle,
   jsToCbor,
@@ -137,42 +136,24 @@ export async function buildBundle(signer: Signer, opts: BuildOpts = {}): Promise
   return buildTar({ 'envelope.cbor': envelope, 'manifest.cbor': manifestBytes, program, ...files })
 }
 
-/** Build a full §7.1 sealed bundle to recipient x-only pubkeys: envelope.cbor
- *  (Sealed) plus manifest.enc / program.enc / ciphertext blobs, all encrypted
- *  under one content key CK. */
+/** Build a full §7.1 sealed bundle to recipient x-only pubkeys -- the app's
+ *  own builder, with test defaults (an invite, created at 5). */
 export async function buildSealedBundle(
   signer: Signer,
   recipients: Uint8Array[],
   opts: BuildOpts = {}
 ): Promise<Uint8Array> {
-  const program = opts.program ?? new TextEncoder().encode('<!doctype html><h1>sealed thing</h1>')
-  const att = new Map<string, { h: Uint8Array; m: string; n: number }>()
-  const blobPlain: Record<string, Uint8Array> = {}
-  for (const [name, bytes] of Object.entries(opts.attachments ?? {})) {
-    att.set(name, { h: hash(bytes), m: 'application/octet-stream', n: bytes.length })
-    blobPlain[hexName(hash(bytes))] = bytes
-  }
-  const manifest: Manifest = {
-    v: 1,
-    prog: hash(program),
+  const attachments = new Map<string, { bytes: Uint8Array }>()
+  for (const [name, bytes] of Object.entries(opts.attachments ?? {})) attachments.set(name, { bytes })
+  return formatBuildSealedBundle(signer, recipients, {
+    program: opts.program ?? new TextEncoder().encode('<!doctype html><h1>sealed thing</h1>'),
     type: opts.type ?? 'invite',
     args: (opts.args ?? null) as Manifest['args'],
-    att
-  }
-  const manifestBytes = encodeManifest(manifest)
-  const env: Parameters<typeof encodeEnvelope>[0] = { man: hash(manifestBytes), created: opts.created ?? 5 }
-  if (opts.path !== undefined) env.path = opts.path
-  if (opts.seq !== undefined) env.seq = opts.seq
-  const inner = await encodeEnvelope(env, signer)
-
-  const { sealed, ck } = sealEnvelope(inner, recipients)
-  const files: Record<string, Uint8Array> = {
-    'envelope.cbor': sealed,
-    'manifest.enc': sealMember(manifestBytes, ck),
-    'program.enc': sealMember(program, ck)
-  }
-  for (const [hex, bytes] of Object.entries(blobPlain)) files[`blobs/${hex}`] = sealMember(bytes, ck)
-  return buildTar(files)
+    attachments,
+    created: opts.created ?? 5,
+    ...(opts.path !== undefined ? { path: opts.path } : {}),
+    ...(opts.seq !== undefined ? { seq: opts.seq } : {})
+  })
 }
 
 /** Re-tar a BundleSource (for precise tampering: parse → corrupt a part → tar). */
@@ -260,7 +241,10 @@ export interface ShellHandle {
   knownTypes(): Promise<{ key: string; testKey: string; source: string; type: string; progHash: string }[]>
   /** Local unsigned drafts. */
   drafts(): Promise<{ id: string; type: string; progHash: string; args: unknown; created: number; updated: number }[]>
-  newDraft(key: string, args?: unknown): Promise<{ id?: string; error?: string }>
+  newDraft(key: string, args?: unknown, recipients?: string[]): Promise<{ id?: string; error?: string }>
+  /** What the To box would make of a typed recipient. */
+  resolveRecipient(input: string): Promise<Record<string, unknown>>
+  newPrivateReply(targetHash: string): Promise<{ id?: string; error?: string }>
   newComment(targetHash: string): Promise<{ id?: string; error?: string }>
   /** Start an attestation about a thing, and read the ones pointing at it. */
   /** Local names for keys: who you have seen, and what you call them. */
@@ -760,14 +744,25 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
         const s = (electron.app as unknown as { __shell: { drafts: () => unknown[] } }).__shell
         return s.drafts() as never
       }),
-    newDraft: (key: string, args?: unknown) =>
+    newDraft: (key: string, args?: unknown, recipients?: string[]) =>
       app.evaluate(
         async (electron, a) => {
-          const s = (electron.app as unknown as { __shell: { newDraft: (k: string, g?: unknown) => unknown } }).__shell
-          return s.newDraft(a.key, a.args) as never
+          const s = (electron.app as unknown as { __shell: { newDraft: (k: string, g?: unknown, r?: string[]) => unknown } })
+            .__shell
+          return s.newDraft(a.key, a.args, a.recipients) as never
         },
-        { key, args }
+        { key, args, recipients }
       ),
+    resolveRecipient: (input: string) =>
+      app.evaluate(async (electron, i) => {
+        const s = (electron.app as unknown as { __shell: { resolveRecipient: (x: string) => unknown } }).__shell
+        return s.resolveRecipient(i) as never
+      }, input),
+    newPrivateReply: (targetHash: string) =>
+      app.evaluate(async (electron, h) => {
+        const s = (electron.app as unknown as { __shell: { newPrivateReply: (x: string) => unknown } }).__shell
+        return s.newPrivateReply(h) as never
+      }, targetHash),
     people: () =>
       app.evaluate(async (electron) => {
         const s = (electron.app as unknown as { __shell: { people: () => unknown[] } }).__shell

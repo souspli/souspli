@@ -82,10 +82,17 @@ signed letter, not that it is the one you meant to fetch. Look at the author.
 
 ## Private letters
 
-The format supports **sealed** letters — encrypted to each recipient, with the
-author's identity inside the ciphertext so outsiders cannot even see who wrote it —
-and Souspli can **receive and open** them today. Decrypted content is held in memory
-only and never written to disk.
+A **sealed** letter is encrypted to each recipient, with the author's identity
+inside the ciphertext. Someone who gets the file without being a recipient can't
+tell who wrote it or who it's for. They can see only that it exists and roughly how
+big it is.
 
-**Writing a sealed letter from the app is not available yet.** Until it is, anything
-you publish is readable by anyone who gets the file. See [status](status.md).
+To write one, add people in the **To** row of **New** (or press **Write
+privately…** in People), then publish as usual. How to choose recipients is in
+[People](people.md#writing-privately). Then hand the file on the way you would any
+other: **Share → Save as file** or **Copy bundle**. Posting a sealed letter to
+relays isn't available yet.
+
+When you open one, it's decrypted into memory only. Nothing in the clear is written
+to disk. After a restart, Souspli decrypts it again from the sealed file it arrived
+in.

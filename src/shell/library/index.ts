@@ -397,12 +397,19 @@ export class Library {
   // NEVER the on-disk CAS. Writing sealed plaintext to the persistent store
   // would silently put someone's private thing on disk in the clear.
   private readonly sealed = new EphemeralStore()
+  // The encryption key a SEALED letter's author bound inside it, by envelope
+  // hash. Memory only, like the plaintext it came from: it is what a private
+  // reply is sealed to, and a fact only the recipients ever saw.
+  private readonly sealedEnc = new Map<string, { scheme: string; key: string }>()
 
   constructor(dir: string, opts: { maxOffers?: number } = {}) {
     if (opts.maxOffers !== undefined && opts.maxOffers > 0) this.maxOffers = opts.maxOffers
     mkdirSync(dir, { recursive: true })
     this.db = new Database(join(dir, 'index.sqlite'))
     this.db.pragma('journal_mode = WAL')
+    // Deleted rows are overwritten, not left in free pages: a private letter's
+    // draft is plaintext until it is sent, and sending deletes it.
+    this.db.pragma('secure_delete = ON')
     this.cas = new CasStore(dir)
     this.migrate()
   }
@@ -659,6 +666,25 @@ export class Library {
         key           TEXT NOT NULL
       );
 
+      -- Which ENCRYPTED tar a sealed letter arrived in. Rows are keyed by the
+      -- inner envelope, which nothing outside can see; this is how the shell
+      -- finds the sealed bytes again -- to open the letter after a restart
+      -- (the plaintext was only ever in memory), and to hand it on as a file.
+      CREATE TABLE IF NOT EXISTS sealed_bundles (
+        envelope_hash TEXT PRIMARY KEY,
+        tar_hash      TEXT NOT NULL
+      );
+
+      -- Who a private draft will be sealed to: x-only keys, and the label the
+      -- human saw when choosing (a petname, a name, or the key shortened).
+      CREATE TABLE IF NOT EXISTS draft_recipients (
+        draft_id TEXT NOT NULL,
+        idx      INTEGER NOT NULL,
+        ek       TEXT NOT NULL,
+        label    TEXT NOT NULL,
+        PRIMARY KEY (draft_id, idx)
+      );
+
       CREATE TABLE IF NOT EXISTS relay_arrivals (
         envelope_hash TEXT NOT NULL,
         relay_url     TEXT NOT NULL,
@@ -909,14 +935,22 @@ export class Library {
   store(result: Extract<AdmissionResult, { status: 'valid' }>, receivedAt: number): AdmitStoreResult {
     const envelopeHash = toHex(result.envelopeHash)
     const existing = this.db.prepare('SELECT envelope_hash FROM things WHERE envelope_hash = ?').get(envelopeHash)
-    if (existing) return { envelopeHash, fork: false, inserted: false }
+    if (existing) {
+      // A sealed letter admitted again -- after a restart, say -- puts its
+      // plaintext back in memory. The row was never the problem; the
+      // ephemeral store forgetting is the whole point of it.
+      if (result.sealed) this.holdSealed(envelopeHash, result)
+      return { envelopeHash, fork: false, inserted: false }
+    }
 
     // Persist bytes to the right store: the on-disk CAS for public content, the
     // in-memory ephemeral store for decrypted SEALED content (never the CAS).
-    const store = result.sealed ? this.sealed : this.cas
-    store.put(result.program)
-    store.put(result.manifestBytes)
-    for (const bytes of result.attachments.values()) store.put(bytes)
+    if (result.sealed) this.holdSealed(envelopeHash, result)
+    else {
+      this.cas.put(result.program)
+      this.cas.put(result.manifestBytes)
+      for (const bytes of result.attachments.values()) this.cas.put(bytes)
+    }
 
     const env = result.envelope
     const authorKey = toHex(env.author.k)
@@ -1439,6 +1473,92 @@ export class Library {
     this.db.prepare('INSERT OR REPLACE INTO relay_cursor (sub_id, since) VALUES (?,?)').run(subId, since)
   }
 
+  /** A sealed letter's plaintext, into memory and nowhere else. */
+  private holdSealed(envelopeHash: string, result: Extract<AdmissionResult, { status: 'valid' }>): void {
+    this.sealed.put(result.program)
+    this.sealed.put(result.manifestBytes)
+    for (const bytes of result.attachments.values()) this.sealed.put(bytes)
+    const a = result.envelope.author
+    if (a.e && a.ek) this.sealedEnc.set(envelopeHash, { scheme: a.e, key: toHex(a.ek) })
+  }
+
+  /** Is this sealed letter readable right now (its plaintext in memory)? */
+  sealedOpen(envelopeHash: string): boolean {
+    const row = this.get(envelopeHash)
+    return !!row && row.sealed && this.sealed.has(row.manifestHash) && this.sealed.has(row.progHash)
+  }
+
+  noteSealedBundle(envelopeHash: string, tarHash: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO sealed_bundles (envelope_hash, tar_hash) VALUES (?,?)').run(envelopeHash, tarHash)
+  }
+
+  sealedTarHash(envelopeHash: string): string | null {
+    const r = this.db.prepare('SELECT tar_hash FROM sealed_bundles WHERE envelope_hash = ?').get(envelopeHash) as
+      | { tar_hash: string }
+      | undefined
+    return r?.tar_hash ?? null
+  }
+
+  /** Sealed letters whose plaintext is not in memory: every one, after a
+   *  restart. With the tar each arrived in, so it can be opened again. */
+  sealedClosed(): { envelopeHash: string; tarHash: string }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT t.envelope_hash, t.manifest_hash, t.prog_hash, s.tar_hash
+           FROM things t JOIN sealed_bundles s ON s.envelope_hash = t.envelope_hash
+          WHERE t.sealed = 1
+          ORDER BY t.received_at DESC`
+      )
+      .all() as { envelope_hash: string; manifest_hash: string; prog_hash: string; tar_hash: string }[]
+    return rows
+      .filter((r) => !(this.sealed.has(r.manifest_hash) && this.sealed.has(r.prog_hash)))
+      .map((r) => ({ envelopeHash: r.envelope_hash, tarHash: r.tar_hash }))
+  }
+
+  /** Sealed rows with no record of their tar: admitted before the record
+   *  existed. Their tars are in the seed store, unlabelled. */
+  sealedWithoutBundle(): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT envelope_hash FROM things t WHERE sealed = 1
+             AND NOT EXISTS (SELECT 1 FROM sealed_bundles s WHERE s.envelope_hash = t.envelope_hash)`
+        )
+        .all() as { envelope_hash: string }[]
+    ).map((r) => r.envelope_hash)
+  }
+
+  /** The key to seal a reply to this sealed letter's author with: the one
+   *  they bound inside it. Known only while it is open. */
+  sealedAuthorEnc(envelopeHash: string): { scheme: string; key: string } | null {
+    return this.sealedEnc.get(envelopeHash) ?? null
+  }
+
+  /** The newest encryption key this author bound to a PUBLIC letter you hold,
+   *  or null. What a private letter to them is sealed to: they signed it, so
+   *  it is theirs -- unlike a key typed in, which is only what you were told. */
+  encKeyFor(scheme: string, key: string): { scheme: string; key: string } | null {
+    const r = this.db
+      .prepare(
+        `SELECT e.scheme, e.key FROM thing_enc e JOIN things t ON t.envelope_hash = e.envelope_hash
+          WHERE t.author_scheme = ? AND t.author_key = ? AND t.sealed = 0
+          ORDER BY t.created DESC, t.rowid DESC LIMIT 1`
+      )
+      .get(scheme, key) as { scheme: string; key: string } | undefined
+    return r ?? null
+  }
+
+  /** Whose public letters bound this encryption key -- to name a typed key. */
+  authorOfEncKey(ek: string): { scheme: string; key: string } | null {
+    const r = this.db
+      .prepare(
+        `SELECT t.author_scheme, t.author_key FROM thing_enc e JOIN things t ON t.envelope_hash = e.envelope_hash
+          WHERE e.key = ? AND t.sealed = 0 ORDER BY t.created DESC LIMIT 1`
+      )
+      .get(ek) as { author_scheme: string; author_key: string } | undefined
+    return r ? { scheme: r.author_scheme, key: r.author_key } : null
+  }
+
   /** The encryption key this thing's author bound to it, or null. */
   boundEncKey(envelopeHash: string): { scheme: string; key: string } | null {
     const r = this.db.prepare('SELECT scheme, key FROM thing_enc WHERE envelope_hash = ?').get(envelopeHash) as
@@ -1819,6 +1939,18 @@ export class Library {
   }
 
   /** Your name for a key, or null. */
+  /** The name an author gave themselves: their newest nametag or card title. */
+  selfName(scheme: string, key: string): string | null {
+    const r = this.db
+      .prepare(
+        `SELECT ti.title FROM things n JOIN titles ti ON ti.envelope_hash = n.envelope_hash
+          WHERE n.author_scheme = ? AND n.author_key = ? AND n.type IN ('nametag', 'card') AND ti.title != ''
+          ORDER BY n.created DESC, n.rowid DESC LIMIT 1`
+      )
+      .get(scheme, key) as { title: string } | undefined
+    return r?.title ?? null
+  }
+
   petname(scheme: string, key: string): { name: string; note: string } | null {
     const r = this.db
       .prepare('SELECT name, note FROM petnames WHERE author_scheme = ? AND author_key = ?')
@@ -1852,6 +1984,8 @@ export class Library {
     note: string
     things: number
     lastSeen: number
+    /** An encryption key is known for them, so a private letter can be sealed to them. */
+    sealable: boolean
   }[] {
     // selfName is the name they gave themselves, newest nametag or card -- a
     // claim, shown as theirs and never in place of your own name for them.
@@ -1862,7 +1996,10 @@ export class Library {
                 (SELECT ti.title FROM things n JOIN titles ti ON ti.envelope_hash = n.envelope_hash
                   WHERE n.author_scheme = t.author_scheme AND n.author_key = t.author_key
                     AND n.type IN ('nametag', 'card') AND ti.title != ''
-                  ORDER BY n.created DESC, n.rowid DESC LIMIT 1) AS self_name
+                  ORDER BY n.created DESC, n.rowid DESC LIMIT 1) AS self_name,
+                EXISTS (SELECT 1 FROM thing_enc e JOIN things n ON n.envelope_hash = e.envelope_hash
+                         WHERE n.author_scheme = t.author_scheme AND n.author_key = t.author_key
+                           AND n.sealed = 0) AS sealable
            FROM things t
            LEFT JOIN petnames p ON p.author_scheme = t.author_scheme AND p.author_key = t.author_key
           GROUP BY t.author_scheme, t.author_key
@@ -1876,12 +2013,14 @@ export class Library {
       name: string | null
       note: string | null
       self_name: string | null
+      sealable: number
     }[]
     return rows.map((r) => ({
       authorScheme: r.author_scheme,
       authorKey: r.author_key,
       name: r.name,
       selfName: r.self_name,
+      sealable: r.sealable === 1,
       note: r.note ?? '',
       things: r.things,
       lastSeen: r.last_seen
@@ -1957,7 +2096,9 @@ export class Library {
       // by the caller (deleteThing); this is the record that would otherwise
       // resume seeding a thing the human deleted, on the next start.
       this.db.prepare('DELETE FROM seeding WHERE envelope_hash = ?').run(envelopeHash)
+      this.db.prepare('DELETE FROM sealed_bundles WHERE envelope_hash = ?').run(envelopeHash)
     })()
+    this.sealedEnc.delete(envelopeHash)
     this.gc(candidates)
     return true
   }
@@ -1965,18 +2106,21 @@ export class Library {
   /** Every content hash still referenced by ANY thing or ANY draft. Drafts are
    *  not in `things` but DO reference their program blob — scanning only
    *  `things` would collect the program out from under a live draft. */
-  private referencedHashes(): Set<string> {
+  private referencedHashes(sealed = false): Set<string> {
     const referenced = new Set<string>()
-    const rows = this.db.prepare('SELECT prog_hash, manifest_hash, sealed FROM things').all() as {
+    // Per store: a SEALED letter's references keep nothing on disk. Its bytes
+    // live in memory, and a draft's copy of them in the CAS -- the plaintext
+    // of a private letter you just sent -- must go when the draft does.
+    const rows = this.db.prepare('SELECT prog_hash, manifest_hash FROM things WHERE sealed = ?').all(sealed ? 1 : 0) as {
       prog_hash: string
       manifest_hash: string
-      sealed: number
     }[]
     for (const r of rows) {
-      for (const h of this.contentHashes({ progHash: r.prog_hash, manifestHash: r.manifest_hash, sealed: r.sealed === 1 })) {
+      for (const h of this.contentHashes({ progHash: r.prog_hash, manifestHash: r.manifest_hash, sealed })) {
         referenced.add(h)
       }
     }
+    if (sealed) return referenced
     for (const d of this.db.prepare('SELECT prog_hash FROM drafts').all() as { prog_hash: string }[]) {
       referenced.add(d.prog_hash)
     }
@@ -1991,11 +2135,11 @@ export class Library {
 
   /** Drop candidate blobs that nothing references any more. */
   private gc(candidates: Set<string>): void {
-    const referenced = this.referencedHashes()
+    const onDisk = this.referencedHashes(false)
+    const inMemory = this.referencedHashes(true)
     for (const h of candidates) {
-      if (referenced.has(h)) continue
-      this.cas.delete(h)
-      this.sealed.delete(h)
+      if (!onDisk.has(h)) this.cas.delete(h)
+      if (!inMemory.has(h)) this.sealed.delete(h)
     }
   }
 
@@ -2085,15 +2229,37 @@ export class Library {
   deleteDraft(id: string): boolean {
     const row = this.getDraft(id)
     if (!row) return false
+    const wasPrivate = this.draftRecipients(id).length > 0
     const candidates = new Set<string>([row.progHash, ...this.draftBlobs(id).map((b) => b.hash)])
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM draft_blobs WHERE draft_id = ?').run(id)
       this.db.prepare('DELETE FROM draft_chain WHERE draft_id = ?').run(id)
       this.db.prepare('DELETE FROM draft_pins WHERE draft_id = ?').run(id)
+      this.db.prepare('DELETE FROM draft_recipients WHERE draft_id = ?').run(id)
       this.db.prepare('DELETE FROM drafts WHERE id = ?').run(id)
     })()
     this.gc(candidates)
+    // secure_delete zeroes the rows in the database, but in WAL mode the old
+    // pages -- a private letter's words -- still sit in the log until it is
+    // checkpointed. Fold it in and empty it now rather than whenever.
+    if (wasPrivate) this.db.pragma('wal_checkpoint(TRUNCATE)')
     return true
+  }
+
+  /** Who a private draft is to; empty for a public one. */
+  draftRecipients(id: string): { ek: string; label: string }[] {
+    return this.db.prepare('SELECT ek, label FROM draft_recipients WHERE draft_id = ? ORDER BY idx').all(id) as {
+      ek: string
+      label: string
+    }[]
+  }
+
+  setDraftRecipients(id: string, recipients: { ek: string; label: string }[]): void {
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM draft_recipients WHERE draft_id = ?').run(id)
+      const ins = this.db.prepare('INSERT INTO draft_recipients (draft_id, idx, ek, label) VALUES (?,?,?,?)')
+      recipients.forEach((r, i) => ins.run(id, i, r.ek, r.label))
+    })()
   }
 
   /** Store program bytes in the CAS (idempotent) and return their hash. */

@@ -59,7 +59,11 @@ what you clicked.
   equally lets anyone correlate the two identities.
 - **A seal is not access control.** Any recipient of a sealed letter can forward it
   to anyone, with your signature intact. It is confidentiality against people who
-  were never sent it — the paper-letter property, no more.
+  were never sent it — the paper-letter property, no more. Souspli says so in the
+  confirm, every time you seal one.
+- **A private letter is not private until it is sent.** Like every draft, it is
+  saved as you type, unencrypted, on your computer. Sending it seals it and removes
+  the draft, its attachments and the database's log of them.
 - **The `created` time on a letter is whatever its author typed.** Souspli orders
   your feed by when *you* received things, and treats the author's date as a claim.
 

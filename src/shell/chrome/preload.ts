@@ -62,7 +62,7 @@ const shell = {
   /** Start an attestation about a thing, and read the ones pointing at it. */
   /** Everyone whose things you hold, and YOUR name for them. Local only. */
   people: (): Promise<
-    { authorScheme: string; authorKey: string; name: string | null; selfName: string | null; note: string; things: number; lastSeen: number }[]
+    { authorScheme: string; authorKey: string; name: string | null; selfName: string | null; note: string; things: number; lastSeen: number; sealable: boolean }[]
   > => ipcRenderer.invoke('shell:people'),
   setPetname: (p: { scheme: string; key: string; name: string; note?: string }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('shell:set-petname', p),
@@ -200,9 +200,16 @@ const shell = {
   knownTypes: (): Promise<unknown[]> => ipcRenderer.invoke('shell:known-types'),
   /** Local, unsigned drafts (newest edit first). */
   drafts: (): Promise<unknown[]> => ipcRenderer.invoke('shell:drafts'),
-  /** Start a draft of a known type; returns its id. */
-  newDraft: (key: string, args?: unknown): Promise<{ id?: string; type?: string; error?: string }> =>
-    ipcRenderer.invoke('shell:new-draft', key, args),
+  /** Start a draft of a known type; returns its id. With `recipients`
+   *  (encryption keys) it is a private letter, sealed to them when published. */
+  newDraft: (key: string, args?: unknown, recipients?: string[]): Promise<{ id?: string; type?: string; error?: string }> =>
+    ipcRenderer.invoke('shell:new-draft', key, args, recipients),
+  /** Turn what was typed in the To box (an address, npub or key) into a key. */
+  resolveRecipient: (input: string): Promise<{ ek: string; label: string; npub: string; known: boolean } | { error: string }> =>
+    ipcRenderer.invoke('shell:resolve-recipient', input),
+  /** Start a reply to a private letter, sealed to its author. */
+  newPrivateReply: (targetHash: string): Promise<{ id?: string; error?: string }> =>
+    ipcRenderer.invoke('shell:new-private-reply', targetHash),
   /** Start a comment on a thing; the shell seeds the target into its args. */
   newComment: (targetHash: string): Promise<{ id?: string; error?: string }> =>
     ipcRenderer.invoke('shell:new-comment', targetHash),

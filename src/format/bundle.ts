@@ -1,7 +1,7 @@
 import { decodeManifest, encodeManifest, type Manifest, type Attachment } from './manifest.js'
 import { verifyEnvelope, type VerifyResult } from './verify.js'
 import { decodeEnvelope, encodeEnvelope, type Envelope, type Signer, type UnsignedEnvelope } from './envelope.js'
-import { isSealed, unsealFull, unsealMember, type Unsealer } from './sealed.js'
+import { isSealed, sealEnvelope, sealMember, unsealFull, unsealMember, type Unsealer } from './sealed.js'
 import { hash, toHex, type Hash } from './hash.js'
 import { bytesEqual, type CborValue } from './cbor.js'
 import { DEFAULT_LIMITS, type DecodeLimits } from './limits.js'
@@ -350,7 +350,7 @@ export interface BuildBundleOptions {
 /**
  * Build + sign a PUBLIC bundle: assemble the manifest, sign the envelope with
  * the injected `Signer`, and pack the tar. The mirror of `admitBundle` — its
- * output re-admits as `valid`. Sealed authoring is deferred (§7).
+ * output re-admits as `valid`. For a sealed one see `buildSealedBundle`.
  */
 export async function buildBundle(signer: Signer, opts: BuildBundleOptions): Promise<Uint8Array> {
   const att = new Map<string, Attachment>()
@@ -369,6 +369,51 @@ export async function buildBundle(signer: Signer, opts: BuildBundleOptions): Pro
   if (opts.enc !== undefined) unsigned.enc = opts.enc
   const envelope = await encodeEnvelope(unsigned, signer)
   return packBundle({ envelope, manifest: manifestBytes, program: opts.program, blobs })
+}
+
+/**
+ * Build + sign a SEALED bundle (§7, §7.1): sign the envelope exactly as
+ * `buildBundle` would, then encrypt it to `recipients` (32-byte x-only keys).
+ * The manifest, program and each attachment travel as their own members under
+ * the same content key.
+ *
+ * Recipients are not listed in the result, and they are the ONLY readers: an
+ * author who wants to read their own copy must be one of them.
+ *
+ * `enc` goes on the INNER envelope, so the binding is visible to recipients
+ * and nobody else -- it is how a recipient learns which key to seal a reply to.
+ */
+export async function buildSealedBundle(
+  signer: Signer,
+  recipients: Uint8Array[],
+  opts: BuildBundleOptions
+): Promise<Uint8Array> {
+  for (const r of recipients) {
+    if (!(r instanceof Uint8Array) || r.length !== 32) throw new Error('seal: a recipient must be a 32-byte x-only key')
+  }
+  const att = new Map<string, Attachment>()
+  const blobs = new Map<string, Uint8Array>()
+  for (const [name, { bytes, mime }] of opts.attachments ?? new Map()) {
+    const h = hash(bytes)
+    att.set(name, { h, m: mime ?? 'application/octet-stream', n: bytes.length })
+    blobs.set(toHex(h), bytes)
+  }
+  const manifest: Manifest = { v: 1, prog: hash(opts.program), type: opts.type, args: opts.args ?? null, att }
+  const manifestBytes = encodeManifest(manifest)
+  const unsigned: UnsignedEnvelope = { man: hash(manifestBytes), created: opts.created ?? Math.floor(Date.now() / 1000) }
+  if (opts.path !== undefined) unsigned.path = opts.path
+  if (opts.seq !== undefined) unsigned.seq = opts.seq
+  if (opts.prev !== undefined) unsigned.prev = opts.prev
+  if (opts.enc !== undefined) unsigned.enc = opts.enc
+  const inner = await encodeEnvelope(unsigned, signer)
+  const { sealed, ck } = sealEnvelope(inner, recipients)
+  const files: [string, Uint8Array][] = [
+    ['envelope.cbor', sealed],
+    ['manifest.enc', sealMember(manifestBytes, ck)],
+    ['program.enc', sealMember(opts.program, ck)]
+  ]
+  for (const [hex, bytes] of blobs) files.push([`blobs/${hex}`, sealMember(bytes, ck)])
+  return writeTar(files)
 }
 
 export interface CosignOptions {

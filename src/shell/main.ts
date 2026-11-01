@@ -37,15 +37,18 @@ import { CasStore, EphemeralStore } from '../main/store.js'
 import { installBridge, setDraftObserver, type ThingMode } from '../main/bridge.js'
 import { cage as cageGlobals, record } from '../main/events.js'
 import type { Draft } from '../main/draft.js'
+import { isXOnlyKey, npubOf, parseRecipient } from './recipient.js'
 import {
   admitBundle,
   buildBundle,
+  buildSealedBundle,
   cborToJs,
   cosignBundle,
   fromHex,
   encodeEnvelope,
   encodeManifest,
   hash,
+  isSealed,
   jsToCbor,
   parseBundle,
   toHex,
@@ -436,7 +439,9 @@ interface ShellSurface {
   knownTypes?: () => { key: string; testKey: string; source: string; type: string; progHash: string }[]
   /** Local unsigned drafts, newest edit first. */
   drafts?: () => DraftRow[]
-  newDraft?: (key: string, args?: unknown) => Record<string, unknown>
+  newDraft?: (key: string, args?: unknown, recipients?: unknown) => Record<string, unknown>
+  resolveRecipient?: (input: string) => Record<string, unknown>
+  newPrivateReply?: (targetHash: string) => Record<string, unknown>
   /** Start a comment draft seeded with the target's hash. */
   newComment?: (targetHash: string) => Record<string, unknown>
   newAttestation?: (targetHash: string) => Record<string, unknown>
@@ -917,7 +922,8 @@ app.whenReady().then(async () => {
       // have -- lands here legitimately.
       const stored = library.store(result, Date.now())
       // Seed the raw admitted bundle so it can be re-served by bundle:<hash>.
-      seedStore.put(raw)
+      const tarHash = seedStore.put(raw)
+      if (result.sealed) library.noteSealedBundle(hex(result.envelopeHash), tarHash)
       // Whatever route it took, holding it settles any offer of it. A pointer
       // fetched, a file dropped in, a bundle pasted -- all the same once the
       // thing is here.
@@ -1108,12 +1114,14 @@ app.whenReady().then(async () => {
         attestsKnown: attestedNow ? library.get(attestedNow) !== null : false,
         attestCount: draft ? 0 : library.countRefsTo(envelopeHash, 'attests'),
         ...trustFacts(current.stored, draft !== null),
+        ...privateFacts(draft?.id ?? null),
         ...(draft ? {} : documentFacts(current.stored.row.manifestHash)),
         ...(draft ? {} : versionFacts(current.stored.row)),
         mine: draft ? true : hex(keyring.identity.address).toLowerCase() === current.stored.row.authorKey
       }
       return { ...current.header, mode: current.activeMode }
     }
+    if (!draft) await reopenSealed(envelopeHash)
     const stored = draft ? draftStoredFrom(draft) : library.load(envelopeHash)
     if (!stored) {
       openLog('refused', { hash: envelopeHash.slice(0, 12), why: draft ? 'draft program missing' : 'not loadable' })
@@ -1226,6 +1234,7 @@ app.whenReady().then(async () => {
       attestsKnown: attested ? library.get(attested) !== null : false,
       attestCount: draft ? 0 : library.countRefsTo(envelopeHash, 'attests'),
       ...trustFacts(stored, draft !== null, tribe),
+      ...privateFacts(draft?.id ?? null),
       // Which forum this claims to be in, and what the votes on it are worth.
       // Both are claims about a thing, so both live here beside replyTo and
       // attests rather than anywhere that reads as verified.
@@ -1492,8 +1501,72 @@ app.whenReady().then(async () => {
 
   /** Start a new local draft of a known type. Returns its id; the chrome then
    *  opens it (in edit mode). */
-  function newDraft(key: unknown, argsSeed?: unknown): Record<string, unknown> {
+  // ── Private letters: who they are to ─────────────────────────────────────
+  /** A recipient as the human will see it, named from the library and never
+   *  from the renderer: whose letters bound this key, and what you call them. */
+  type Recipient = { ek: string; label: string; npub: string; known: boolean }
+  const MAX_RECIPIENTS = 32
+
+  function recipientFor(ek: string): Recipient {
+    const author = library.authorOfEncKey(ek)
+    const npub = npubOf(ek)
+    if (!author) return { ek, label: `${npub.slice(0, 12)}…${npub.slice(-4)}`, npub, known: false }
+    const label =
+      library.petname(author.scheme, author.key)?.name ??
+      library.selfName(author.scheme, author.key) ??
+      `0x${author.key.slice(0, 6)}…${author.key.slice(-4)}`
+    return { ek, label, npub, known: true }
+  }
+
+  /** What was typed into the To box (or picked from People, as an address),
+   *  turned into a key to seal to. An address is only as good as the letters
+   *  you hold from it: the key must be one they bound and signed. */
+  function resolveRecipient(input: unknown): Recipient | { error: string } {
+    if (typeof input !== 'string' || input.length > 200) return { error: 'bad recipient' }
+    const p = parseRecipient(input)
+    if (p.kind === 'error') return { error: p.reason }
+    if (p.kind === 'enc') {
+      if (p.ek === hex(keyring.identity.nostrPubkey)) return { error: 'That is you. Your own copy is sealed to you anyway.' }
+      return recipientFor(p.ek)
+    }
+    if (p.scheme === keyring.signer.scheme && p.key === myKeyHex()) {
+      return { error: 'That is you. Your own copy is sealed to you anyway.' }
+    }
+    const bound = library.encKeyFor(p.scheme, p.key)
+    if (!bound) {
+      return {
+        error:
+          'No private-letter key is known for that address: none of their letters you hold names one. Ask them for their npub, or for any letter they wrote with Souspli.'
+      }
+    }
+    return recipientFor(bound.key)
+  }
+
+  /** Recipients the renderer asked for, re-checked: keys only, each on the
+   *  curve, no duplicates, never yourself (you are added at sealing). */
+  function checkRecipients(raw: unknown): Recipient[] | { error: string } {
+    if (!Array.isArray(raw) || raw.length > MAX_RECIPIENTS) return { error: 'bad recipients' }
+    const mine = hex(keyring.identity.nostrPubkey)
+    const out: Recipient[] = []
+    for (const ek of raw) {
+      if (typeof ek !== 'string' || !isXOnlyKey(ek)) return { error: 'bad recipient key' }
+      if (ek === mine || out.some((r) => r.ek === ek)) continue
+      out.push(recipientFor(ek))
+    }
+    // Asked for a private letter and left with nobody but yourself: refuse,
+    // rather than quietly start a PUBLIC one.
+    if (raw.length > 0 && out.length === 0) return { error: 'a private letter needs someone other than you to send it to' }
+    return out
+  }
+
+  function newDraft(key: unknown, argsSeed?: unknown, recipientsRaw?: unknown): Record<string, unknown> {
     if (typeof key !== 'string') return { error: 'bad type key' }
+    let recipients: Recipient[] = []
+    if (recipientsRaw !== undefined && recipientsRaw !== null) {
+      const r = checkRecipients(recipientsRaw)
+      if ('error' in r) return r
+      recipients = r
+    }
     // A seed must survive the same trip the program's own args do: JSON for
     // the drafts table, canonical CBOR at signing time, within the args cap.
     let seed: unknown = undefined
@@ -1522,6 +1595,7 @@ app.whenReady().then(async () => {
       progHash = entry.progHash
     }
     const row = library.createDraft({ type, progHash, args: seed })
+    if (recipients.length > 0) library.setDraftRecipients(row.id, recipients.map((r) => ({ ek: r.ek, label: r.label })))
     notifyFeedChanged()
     return { id: row.id, type: row.type }
   }
@@ -1543,6 +1617,19 @@ app.whenReady().then(async () => {
     // left it would vanish from the only place anyone is reading.
     const group = inGroupOf(targetHash)
     return newDraft('starter:comment', { replyTo: targetHash, ...(group ? { inGroup: group } : {}) })
+  }
+
+  /** Answer a private letter privately: a comment sealed to its author (and
+   *  you). A public comment would name the sealed letter's hash for anyone to
+   *  see, and say you had received it. */
+  function newPrivateReply(targetHash: unknown): Record<string, unknown> {
+    if (typeof targetHash !== 'string' || !HEX64.test(targetHash)) return { error: 'bad hash' }
+    const row = library.get(targetHash)
+    if (!row) return { error: 'that letter is not in your library' }
+    if (!row.sealed) return { error: 'that letter is public; comment on it instead' }
+    const bound = library.sealedAuthorEnc(targetHash) ?? library.encKeyFor(row.authorScheme, row.authorKey)
+    if (!bound) return { error: 'its author named no private-letter key, so there is nothing to seal a reply to' }
+    return newDraft('starter:comment', { replyTo: targetHash }, [bound.key])
   }
 
   /** Start an attestation about `targetHash`. Same shape as newComment: a
@@ -2297,6 +2384,12 @@ app.whenReady().then(async () => {
    *
    *  Recomputed on every open rather than cached with the mount, for the same
    *  reason the reply counts are: a vouch published since is real news. */
+  /** Who a private draft is to, for its header. Null for a public one. */
+  function privateFacts(draftId: string | null): Record<string, unknown> {
+    const to = draftId ? library.draftRecipients(draftId) : []
+    return { privateTo: to.length > 0 ? to.map((r) => recipientFor(r.ek).label) : null }
+  }
+
   function trustFacts(stored: StoredThing, draft: boolean, tribe = myTribe()): Record<string, unknown> {
     const subject = draft ? null : vouchSubject(stored.manifest.args)
     return {
@@ -2861,6 +2954,11 @@ app.whenReady().then(async () => {
    *  If this ever gets expensive the answer is an envelope->tar index TABLE
    *  (the library has no schema versioning, so never a new column). */
   function seedTarHashesFor(envelopeHashHex: string): string[] {
+    // A sealed letter's tar holds only ciphertext: its envelope hash is the
+    // OUTER one, which no row is keyed by. The library recorded which tar it
+    // came in when it was admitted.
+    const sealedTar = library.sealedTarHash(envelopeHashHex)
+    if (sealedTar) return seedStore.has(sealedTar) ? [sealedTar] : []
     const found: string[] = []
     for (const tarHash of seedStore.list()) {
       const bytes = seedStore.readAll(tarHash)
@@ -2874,10 +2972,41 @@ app.whenReady().then(async () => {
     return found
   }
 
-  function removeSeedsFor(envelopeHashHex: string): void {
-    // Every match, not just the first: the same envelope can arrive in more
-    // than one tar, and deleting a thing must stop seeding all of them.
-    for (const tarHash of seedTarHashesFor(envelopeHashHex)) seedStore.delete(tarHash)
+  /** Open a sealed letter again: admit the encrypted tar it arrived in with
+   *  this identity's key, which puts the plaintext back in memory. Nothing in
+   *  the clear is ever written to disk, so after a restart this is the only
+   *  way to read one. False if it cannot be (no tar, or not ours after all). */
+  async function reopenSealed(envelopeHash: string): Promise<boolean> {
+    if (library.sealedOpen(envelopeHash)) return true
+    const tarHash = library.sealedTarHash(envelopeHash)
+    const tar = tarHash ? seedStore.readAll(tarHash) : null
+    if (!tar) return false
+    const result = await admission.admit(tar, keyring.unsealer)
+    if (result.status !== 'valid' || !result.sealed || hex(result.envelopeHash) !== envelopeHash) return false
+    library.store(result, Date.now())
+    return true
+  }
+
+  /** At startup: label the tars of sealed letters admitted before the shell
+   *  recorded them, then open every sealed letter, newest first. */
+  async function reopenAllSealed(): Promise<void> {
+    const unlabelled = new Set(library.sealedWithoutBundle())
+    if (unlabelled.size > 0) {
+      for (const tarHash of seedStore.list()) {
+        const bytes = seedStore.readAll(tarHash)
+        if (!bytes) continue
+        try {
+          if (!isSealed(parseBundle(bytes).envelope)) continue
+        } catch {
+          continue
+        }
+        const r = await admission.admit(bytes, keyring.unsealer)
+        if (r.status !== 'valid' || !r.sealed || !unlabelled.has(hex(r.envelopeHash))) continue
+        library.noteSealedBundle(hex(r.envelopeHash), tarHash)
+        library.store(r, Date.now())
+      }
+    }
+    for (const { envelopeHash } of library.sealedClosed()) await reopenSealed(envelopeHash)
   }
 
   /** Start serving a thing to peers, and remember that we are.
@@ -3256,9 +3385,12 @@ app.whenReady().then(async () => {
     // seeding record, and a live torrent left running would keep serving a
     // thing the human just deleted.
     seeder.stop(envelopeHash)
+    // Found before the row goes: a sealed letter's tar is found through the
+    // library, and the record of it goes with the row.
+    const seeds = seedTarHashesFor(envelopeHash)
     const deleted = library.delete(envelopeHash)
     if (deleted) {
-      removeSeedsFor(envelopeHash)
+      for (const tarHash of seeds) seedStore.delete(tarHash)
       notifyFeedChanged()
     }
     return { deleted }
@@ -3279,6 +3411,8 @@ app.whenReady().then(async () => {
      *  open thing changes before the human decides. */
     attachments: Map<string, { bytes: Uint8Array; mime?: string }>
     program: Uint8Array
+    /** Who it will be sealed to, as shown in the confirm. Empty: public. */
+    recipients: Recipient[]
     timer: ReturnType<typeof setTimeout>
   }
   /** A co-signature awaiting approval: the manifest bytes VERBATIM (never a
@@ -3316,7 +3450,7 @@ app.whenReady().then(async () => {
     // path/seq/prev are envelope fields (§5.3), not args, so a program cannot
     // put itself into someone's version history.
     const chain = p.draftId ? library.draftChain(p.draftId) : null
-    const tar = await buildBundle(keyring.signer, {
+    const opts = {
       program: p.program,
       type: p.draft.type,
       args,
@@ -3324,11 +3458,19 @@ app.whenReady().then(async () => {
       // Bind this author's nostr key, covered by the signature. It is what
       // lets a message on another network be checked against the thing it
       // carries -- without it a relay event and a thing are two unrelated
-      // signatures that happen to arrive together.
+      // signatures that happen to arrive together. Inside a sealed letter it
+      // is what a recipient seals a reply to.
       enc: { e: NOSTR_ENC_SCHEME, ek: keyring.identity.nostrPubkey },
       ...(chain ? { path: chain.path, seq: chain.seq, prev: fromHex(chain.prev) } : {})
-    })
-    return ingestBytes(tar)
+    }
+    // The recipients the human CONFIRMED, not whatever the draft holds now.
+    if (p.recipients.length > 0) {
+      // Plus you: a sealed letter opens only for the keys it is sealed to, and
+      // the author is not one of them unless added.
+      const keys = [...p.recipients.map((r) => fromHex(r.ek)), keyring.identity.nostrPubkey]
+      return ingestBytes(await buildSealedBundle(keyring.signer, keys, opts))
+    }
+    return ingestBytes(await buildBundle(keyring.signer, opts))
   }
 
   /** The chrome Publish button: raise a confirm for the LATEST DRAFT — the
@@ -3360,13 +3502,17 @@ app.whenReady().then(async () => {
     // drafts, a fully-carried article would otherwise report 0.
     let resolvedBytes = 0
     for (const { bytes } of attachments.values()) resolvedBytes += bytes.length
+    const recipients = o.draftId ? library.draftRecipients(o.draftId).map((r) => recipientFor(r.ek)) : []
     const summary: Record<string, unknown> = {
       type: o.latestDraft.type,
       args: o.latestDraft.args,
       att: o.latestDraft.att,
       carry: o.latestDraft.carry,
       argsBytes: o.latestDraftMeta.argsBytes,
-      blobBytes: resolvedBytes
+      blobBytes: resolvedBytes,
+      // A private letter: the chrome names who it is for, and says that any
+      // of them can pass it on (§7: shells MUST, at the point of sealing).
+      recipients: recipients.map((r) => ({ label: r.label, npub: r.npub, known: r.known }))
     }
     const timer = setTimeout(() => {
       pendingConfirms.delete(id)
@@ -3379,6 +3525,7 @@ app.whenReady().then(async () => {
       draftId: o.draftId,
       attachments,
       program: o.stored.program,
+      recipients,
       timer
     })
     applyVisibility() // cages hide while the human decides in chrome
@@ -3549,7 +3696,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('shell:publish', () => publishLatestDraft())
   ipcMain.handle('shell:known-types', () => knownTypes())
   ipcMain.handle('shell:drafts', () => library.listDrafts())
-  ipcMain.handle('shell:new-draft', (_e, key: unknown, args: unknown) => newDraft(key, args))
+  ipcMain.handle('shell:new-draft', (_e, key: unknown, args: unknown, recipients: unknown) => newDraft(key, args, recipients))
+  ipcMain.handle('shell:resolve-recipient', (_e, input: unknown) => resolveRecipient(input))
+  ipcMain.handle('shell:new-private-reply', (_e, targetHash: unknown) => newPrivateReply(targetHash))
   ipcMain.handle('shell:new-comment', (_e, h: unknown) => newComment(h))
   ipcMain.handle('shell:new-attestation', (_e, h: unknown) => newAttestation(h))
   ipcMain.handle('shell:people', () => library.people())
@@ -3726,7 +3875,9 @@ app.whenReady().then(async () => {
   shell.publishDraft = () => publishLatestDraft()
   shell.knownTypes = () => knownTypes()
   shell.drafts = () => library.listDrafts()
-  shell.newDraft = (key, args) => newDraft(key, args)
+  shell.newDraft = (key, args, recipients) => newDraft(key, args, recipients)
+  shell.resolveRecipient = (input) => resolveRecipient(input)
+  shell.newPrivateReply = (targetHash) => newPrivateReply(targetHash)
   shell.newComment = (h) => newComment(h)
   shell.newAttestation = (h) => newAttestation(h)
   shell.people = () => library.people()
@@ -3874,6 +4025,11 @@ app.whenReady().then(async () => {
     }
     pushTransfers()
   })()
+
+  // Sealed letters' plaintext lives only in memory, so a restart forgot it.
+  // Not awaited for the same reason; opening one before this reaches it
+  // reopens that one on the spot.
+  void reopenAllSealed().catch((e: unknown) => record({ type: 'reopen-sealed-failed', reason: String(e) }))
 
   void (async () => {
     for (const row of library.seeding()) {

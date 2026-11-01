@@ -26,6 +26,38 @@ box with that person's full address and see everything you hold from them.
 you wrote: private letters you can open, plus public ones that name your key (a
 vouch about you, a contract you're asked to sign, a group that lists you).
 
+## Writing privately
+
+A private letter is **sealed**: encrypted so only the people you send it to, and you,
+can open it. To write one, use the **To** row in **New**, or press **Write
+privately…** beside someone in People.
+
+You can name a recipient in three ways:
+
+- **Pick them from People.** This is the best way. You can pick only someone you
+  hold a letter from, because every letter Souspli writes names its author's
+  private-letter key, under their signature. That key is the one you seal to.
+- **Type their address** (`0x…`). This works the same way as picking them, so you
+  need to hold a letter from them.
+- **Type an npub, or a 64-character key.** This works for someone you hold nothing
+  from. But nothing proves whose key it is, so it's marked as typed in. A mistyped
+  key is refused. A wrong one that happens to be valid isn't, so check it.
+
+Before you seal, Souspli shows who it's for and says plainly: *anyone you send this
+to can forward it, with your signature intact.* A seal keeps a letter from people
+it was never sent to. It can't stop a recipient from passing it on. There's no
+"recipients only" and no un-sending.
+
+The list of recipients isn't written anywhere in the letter. A recipient learns
+that they could open it, and nothing more about who else could.
+
+Until you send it, a private draft is saved on this computer **unencrypted**, like
+every draft. The header says so. Sending seals it and removes the draft.
+
+To answer a private letter, press **Reply privately**. The reply is sealed to its
+author, and to you. A public comment would show everyone which letter it answers,
+and that you had received it.
+
 ## Petnames: private
 
 A **petname** is what *you* call a key: "Ada", "the ops account", "landlord". It is
