@@ -27,9 +27,9 @@ never installs the desktop app.
 |---|---|
 | Kinds | 3400 only |
 | Content | ≤ `MAX_CONTENT_BYTES` (45 KB: the app's 32 KiB inline cap, base64'd). Bigger letters are posted as a **pointer** (`thing-fetch`). |
-| Required tags | `["t","thing"]` and `["x",<envelope hash>]`; a bundle **or** a pointer |
+| Required tags | `["t","thing"]` and `["x",<64 hex>]`: the envelope hash, or for a sealed letter the hash of its encrypted bytes. A bundle **or** a pointer |
 | `created_at` | not more than an hour in the future (a far-future date would deafen readers that follow a cursor) |
-| Rate | `EVENTS_PER_PUBKEY_PER_HOUR` (60) and `EVENTS_PER_IP_PER_HOUR` (120) |
+| Rate | `EVENTS_PER_PUBKEY_PER_HOUR` (60) and `EVENTS_PER_IP_PER_HOUR` (120). A sealed letter is posted under a one-time key, so for those only the per-IP limit applies. |
 | Blocking | `BLOCKED_PUBKEYS`, comma-separated hex keys — the operator's only moderation lever |
 | Subscriptions | 4 per connection, 4 filters each; stored events are sent **oldest first**, newest `limit` (≤ 1000) |
 

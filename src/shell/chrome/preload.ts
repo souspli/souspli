@@ -240,8 +240,8 @@ const shell = {
   onConfirmRequest: (cb: (req: { id: number; kind: string; summary: Record<string, unknown> }) => void): void => {
     ipcRenderer.on('shell:confirm-request', (_e, req) => cb(req))
   },
-  respondConfirm: (id: number, approved: boolean): void => {
-    ipcRenderer.send('shell:confirm-response', id, approved)
+  respondConfirm: (id: number, approved: boolean, opts?: { sendToRelays?: boolean }): void => {
+    ipcRenderer.send('shell:confirm-response', id, approved, opts ?? {})
   },
   /** Main pushes the outcome of an approved publish (admission summary). */
   onPublishResult: (cb: (outcome: Record<string, unknown>) => void): void => {

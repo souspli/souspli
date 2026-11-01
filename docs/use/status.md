@@ -34,7 +34,6 @@ macOS, Windows and Linux):
 
 | Missing | What it means for you |
 |---|---|
-| **Sending private letters through relays** | You can write a sealed letter and hand it on as a file, but Share will not post one to a relay yet. |
 | **Verified names (ENS)** | The logic is written and tested, but the library it needs is not shipped and there is no setting for an Ethereum node. In current builds no name is ever shown as verified; you have petnames. |
 | **Key rotation and revocation** | A stolen key signs as you forever. No mechanism yet. |
 | **Recovery phrase for an existing key** | A phrase is shown only when an identity is generated. Afterwards the only backup is the raw private key. |

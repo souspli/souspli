@@ -28,7 +28,7 @@ import { mountThing, type MountedThing } from './mount/index.js'
 import { TransportService, FileTransport, HttpTransport, SeedTransport } from './transport/index.js'
 import { TorrentService, displayNameOf, infoHashOf } from './torrent/index.js'
 import { NostrService, buildThingEvent, MAX_INLINE_BUNDLE, TAG, type ParsedThingEvent } from './nostr/index.js'
-import { NOSTR_ENC_SCHEME } from './nostr/event.js'
+import { NOSTR_ENC_SCHEME, SEALED_TYPE, buildSealedEvent } from './nostr/event.js'
 import { NamingService, DirectResolver, EnsResolver, NostrResolver, type EnsClient } from './naming/index.js'
 import { createMockEnsClient } from './naming/mock-ens.js'
 import { createViemEnsClient } from './naming/ens-viem.js'
@@ -3109,6 +3109,7 @@ app.whenReady().then(async () => {
    *  every way of being done with an event -- including the early returns --
    *  advances it exactly once, and only after the work is actually done. */
   async function handleRelayThing(ev: ParsedThingEvent, url: string): Promise<void> {
+    if (ev.type === SEALED_TYPE) return handleSealedEvent(ev, url)
     // A pointer rather than an inline bundle. Recorded as an OFFER and
     // deliberately not followed: this is the first thing in the shell that
     // could make the machine download because a stranger said to, and it does
@@ -3167,6 +3168,50 @@ app.whenReady().then(async () => {
       Date.now()
     )
     if (!held) notifyFeedChanged()
+  }
+
+  /** Hashes of sealed tars that were not for us, so a relay replaying them
+   *  (a reconnect, a second relay) costs a lookup rather than a trial
+   *  decryption each time. Memory only: what you could not open is nobody's
+   *  business, yours included. */
+  const notForMe = new Set<string>()
+  const MAX_NOT_FOR_ME = 10_000
+
+  /** A sealed letter off a relay, posted under a one-time key. Its `x` is the
+   *  hash of the ciphertext, not an envelope hash -- so the check is that the
+   *  bytes ARE what the tag says, and the rest is admission's, as always.
+   *
+   *  Every reader receives every sealed letter and tries to open it; that is
+   *  what not listing recipients costs. One that is not for you is dropped
+   *  without a word: no row, no record, nothing in the feed. */
+  async function handleSealedEvent(ev: ParsedThingEvent, url: string): Promise<void> {
+    if (!ev.bundle) return // never a pointer: following one would name the sender's address
+    const x = ev.envelopeHash
+    if (toHex(hash(ev.bundle)) !== x) {
+      record({ type: 'relay-mismatch', advertised: x, got: toHex(hash(ev.bundle)) })
+      return
+    }
+    if (seedStore.has(x) || notForMe.has(x)) return
+    try {
+      if (!isSealed(parseBundle(ev.bundle).envelope)) {
+        record({ type: 'relay-refused', relay: url, hash: x, reason: 'tagged sealed, but it is a public letter' })
+        return
+      }
+    } catch (e) {
+      record({ type: 'relay-refused', relay: url, hash: x, reason: (e as Error).message })
+      return
+    }
+    const outcome = await ingestBytes(ev.bundle)
+    if (outcome.status === 'not-for-me') {
+      if (notForMe.size >= MAX_NOT_FOR_ME) notForMe.clear()
+      notForMe.add(x)
+      return
+    }
+    if (outcome.status !== 'valid') {
+      record({ type: 'relay-refused', relay: url, hash: x, reason: String(outcome.reason ?? outcome.status) })
+    }
+    // No relay arrival is noted: the poster is a key made for that one event,
+    // and "offered by" it would read as a fact about somebody.
   }
 
   nostr.setHandler((ev, url) => {
@@ -3329,10 +3374,8 @@ app.whenReady().then(async () => {
     }
     const row = library.get(envelopeHash)
     if (!row) return { error: 'not found' }
-    // A sealed thing is addressed to named readers. Handing it to a relay
-    // would not reveal its contents, but it would publish the fact of it to
-    // everyone -- so this refuses rather than deciding that for the human.
-    if (row.sealed) return { error: 'refusing to post a sealed letter to a relay' }
+    // A sealed letter goes its own way: under a one-time key, saying nothing.
+    if (row.sealed) return postSealed(envelopeHash)
     if (nostr.status().length === 0) return { error: 'no relays — add one first' }
     const exported = exportThing(envelopeHash)
     if ('error' in exported) return { error: exported.error }
@@ -3363,6 +3406,27 @@ app.whenReady().then(async () => {
     )
     const sent = nostr.publish(event)
     return { posted: sent, inline, relays: nostr.status().length, eventId: event.id }
+  }
+
+  /** Send a sealed letter to every relay, anonymously: the ENCRYPTED bytes it
+   *  was sealed into, under a key made for this one event (buildSealedEvent).
+   *  Inline only. A pointer would be a magnet, and a magnet is served from
+   *  your address -- which is exactly what this is not supposed to reveal. */
+  async function postSealed(envelopeHash: string): Promise<Record<string, unknown>> {
+    const row = library.get(envelopeHash)
+    if (!row?.sealed) return { error: 'not a sealed letter' }
+    if (nostr.status().length === 0) return { error: 'no relays — add one first' }
+    const tarHash = library.sealedTarHash(envelopeHash)
+    const tar = tarHash ? seedStore.readAll(tarHash) : null
+    if (!tar) return { error: 'the sealed bytes are no longer held' }
+    if (tar.length > MAX_INLINE_BUNDLE) {
+      return {
+        error: `too large to send privately through relays (${Math.ceil(tar.length / 1024)} KB, the limit is ${MAX_INLINE_BUNDLE / 1024} KB) — send it as a file`
+      }
+    }
+    const event = await buildSealedEvent(tar, Math.floor(Date.now() / 1000))
+    const sent = nostr.publish(event)
+    return { posted: sent, inline: true, sealed: true, relays: nostr.status().length, eventId: event.id }
   }
 
   function relayState(): Record<string, unknown> {
@@ -3512,7 +3576,10 @@ app.whenReady().then(async () => {
       blobBytes: resolvedBytes,
       // A private letter: the chrome names who it is for, and says that any
       // of them can pass it on (§7: shells MUST, at the point of sealing).
-      recipients: recipients.map((r) => ({ label: r.label, npub: r.npub, known: r.known }))
+      recipients: recipients.map((r) => ({ label: r.label, npub: r.npub, known: r.known })),
+      // How many relays it could also be sent through, anonymously. The chrome
+      // offers that only when this is above zero.
+      relayCount: recipients.length > 0 ? library.relays().length : 0
     }
     const timer = setTimeout(() => {
       pendingConfirms.delete(id)
@@ -3534,8 +3601,10 @@ app.whenReady().then(async () => {
     chrome.webContents.send('shell:confirm-request', confirmReq)
     return { status: 'pending', id }
   }
-  ipcMain.on('shell:confirm-response', (_e, id: unknown, approved: unknown) => {
+  ipcMain.on('shell:confirm-response', (_e, id: unknown, approved: unknown, opts: unknown) => {
     if (typeof id !== 'number' || typeof approved !== 'boolean') return
+    // The human ticked "also send it through my relays" in the confirm.
+    const sendToRelays = (opts as { sendToRelays?: unknown } | null)?.sendToRelays === true
     const p = pendingConfirms.get(id)
     pendingConfirms.delete(id)
     applyVisibility() // restore the cages once nothing is pending
@@ -3572,6 +3641,15 @@ app.whenReady().then(async () => {
           // then the view may have moved on.
           outcome.consumedDraftId = p.draftId
           notifyFeedChanged()
+        }
+        return outcome
+      })
+      .then(async (outcome) => {
+        // Sent only once it is sealed and stored, and only if it was sealed:
+        // the box is offered for private letters alone, and a renderer
+        // claiming otherwise does not make a public letter go anywhere.
+        if (sendToRelays && outcome.status === 'valid' && outcome.sealed === true && p.recipients.length > 0) {
+          outcome.relaySend = await postSealed(String(outcome.envelopeHash))
         }
         return outcome
       })
