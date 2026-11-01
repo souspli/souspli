@@ -572,6 +572,46 @@ body {
   margin: var(--evm-space-3) 0;
 }
 
+/* New: the optional To row. Empty is a public letter. */
+.sh-new-to {
+  border: 1px solid var(--evm-border);
+  border-radius: var(--evm-radius-md);
+  padding: var(--evm-space-2) var(--evm-space-3);
+  margin-bottom: var(--evm-space-3);
+}
+.sh-new-modal--private .sh-new-to { border-color: var(--evm-purple); }
+.sh-new-to-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--evm-space-2);
+}
+.sh-new-to-line > .sh-compose-label { flex: 0 0 auto; }
+.sh-new-to-chips { display: contents; }
+.sh-new-to-chip { display: inline-flex; align-items: center; gap: 4px; text-transform: none; }
+.sh-new-to-chip-x {
+  background: none; border: 0; padding: 0 2px; color: inherit; cursor: pointer; font: inherit; opacity: 0.7;
+}
+.sh-new-to-chip-x:hover { opacity: 1; }
+.sh-new-to-input { flex: 1 1 12em; min-width: 10em; padding: 2px 8px; font-size: var(--evm-text-sm); }
+.sh-new-to-pick { flex: 0 1 12em; padding: 2px 6px; font-size: var(--evm-text-sm); }
+.sh-new-to-error { color: var(--evm-danger); }
+.sh-new-to-error:empty { display: none; }
+.sh-new-to > .sh-hint { margin: var(--evm-space-2) 0 0; }
+.sh-new-to-chip-x:focus-visible { outline: 1px solid currentColor; }
+
+/* Private letters in the header and the confirm. */
+.sh-private { text-transform: none; white-space: nowrap; }
+.sh-private-note { white-space: nowrap; }
+.sh-confirm-private {
+  border-left: 3px solid var(--evm-purple);
+  padding: var(--evm-space-1) var(--evm-space-3);
+  margin: var(--evm-space-3) 0;
+}
+.sh-confirm-private > p { margin: var(--evm-space-1) 0; }
+.sh-confirm-private-to { color: var(--evm-text-1); }
+.sh-confirm-forward { color: var(--evm-text-1); font-weight: var(--evm-weight-semibold); }
+
 /* "by you" marker + the All | Mine feed filter. */
 .sh-feed-you {
   color: var(--evm-accent);

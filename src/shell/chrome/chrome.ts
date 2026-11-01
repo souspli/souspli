@@ -70,11 +70,13 @@ interface ShellApi extends ForumApi {
   onFileOpened(cb: (r: Record<string, unknown>) => void): void
   knownTypes(): Promise<KnownTypeEntry[]>
   drafts(): Promise<DraftRow[]>
-  newDraft(key: string, args?: unknown): Promise<{ id?: string; type?: string; error?: string }>
+  newDraft(key: string, args?: unknown, recipients?: string[]): Promise<{ id?: string; type?: string; error?: string }>
+  resolveRecipient(input: string): Promise<Recipient | { error: string }>
+  newPrivateReply(targetHash: string): Promise<{ id?: string; error?: string }>
   newComment(targetHash: string): Promise<{ id?: string; error?: string }>
   newAttestation(targetHash: string): Promise<{ id?: string; error?: string }>
   people(): Promise<
-    { authorScheme: string; authorKey: string; name: string | null; selfName: string | null; note: string; things: number; lastSeen: number }[]
+    { authorScheme: string; authorKey: string; name: string | null; selfName: string | null; note: string; things: number; lastSeen: number; sealable: boolean }[]
   >
   setPetname(p: { scheme: string; key: string; name: string; note?: string }): Promise<{ ok: boolean }>
   onOpenPeople(cb: () => void): void
@@ -199,6 +201,15 @@ interface DraftRow {
   created: number
   updated: number
 }
+/** Somebody a private letter is sealed to, as main named them. `known`: the
+ *  key was bound by a letter of theirs you hold, not just typed in. */
+interface Recipient {
+  ek: string
+  label: string
+  npub: string
+  known: boolean
+}
+
 interface HeaderFacts {
   type: string
   authorScheme: string
@@ -261,6 +272,8 @@ interface HeaderFacts {
   vouchAboutScheme?: string | null
   vouchAboutKnown?: boolean
   vouchAboutName?: string | null
+  /** A private draft: who it will be sealed to. Null when public. */
+  privateTo?: string[] | null
 }
 type Outcome =
   | { status: 'valid'; type: string; author?: { k: string } }
@@ -862,17 +875,105 @@ async function openAccountModal(): Promise<void> {
 /** The New chooser: built-in starters, then programs already in the library,
  *  then the raw "bring your own HTML" path. Picking a type starts a local
  *  DRAFT — nothing is signed until the human publishes it. */
-async function openNewMenu(): Promise<void> {
+async function openNewMenu(preset: Recipient[] = []): Promise<void> {
   // Fetch before the overlay exists: an await afterwards would hide the cage
   // views for longer than the modal is actually up.
-  const types = await shell.knownTypes()
+  const [types, people] = await Promise.all([shell.knownTypes(), shell.people().catch(() => [])])
   const overlay = el('div', 'evm-modal-overlay')
   const modal = el('div', 'evm-modal sh-new-modal')
   modal.setAttribute('data-testid', 'new-menu')
   const header = el('div', 'evm-modal-header')
-  header.append(el('span', 'evm-modal-title', 'New'))
+  const titleEl = el('span', 'evm-modal-title', 'New')
+  header.append(titleEl)
   const body = el('div', 'evm-modal-body')
   body.append(el('p', 'sh-hint', 'Pick what to make. It starts as a draft on this machine — nothing is signed or shared until you publish it.'))
+
+  // ── To: optional. Empty is a public letter; anyone here makes it private.
+  const recipients: Recipient[] = []
+  const toRow = el('div', 'sh-new-to')
+  toRow.setAttribute('data-testid', 'new-to')
+  const chips = el('span', 'sh-new-to-chips')
+  const toInput = el('input', 'evm-input sh-new-to-input') as HTMLInputElement
+  toInput.placeholder = 'Address, npub or key'
+  toInput.spellcheck = false
+  toInput.setAttribute('data-testid', 'new-to-input')
+  toInput.setAttribute('aria-label', 'Add a recipient')
+  const addBtn = el('button', 'evm-btn evm-btn--ghost evm-btn--sm', 'Add') as HTMLButtonElement
+  addBtn.setAttribute('data-testid', 'new-to-add')
+  // People, each enabled only if a private letter can actually reach them.
+  const pick = el('select', 'evm-input sh-new-to-pick') as HTMLSelectElement
+  pick.setAttribute('data-testid', 'new-to-pick')
+  pick.setAttribute('aria-label', 'Pick a recipient from People')
+  pick.append(new Option('From People…', ''))
+  for (const p of people) {
+    if (isMine(p)) continue
+    const lab = authorLabel({ authorScheme: p.authorScheme, authorKey: p.authorKey, petname: p.name })
+    const name = lab.named ? lab.text : p.selfName ? `“${p.selfName}” ${lab.text}` : lab.text
+    const opt = new Option(p.sealable ? name : `${name} — no private-letter key known`, `0x${p.authorKey}`)
+    opt.disabled = !p.sealable
+    opt.setAttribute('data-author-key', p.authorKey)
+    pick.append(opt)
+  }
+  const toError = el('div', 'sh-hint sh-new-to-error')
+  toError.setAttribute('data-testid', 'new-to-error')
+  const toHint = el('p', 'sh-hint')
+  toHint.setAttribute('data-testid', 'new-to-hint')
+  const toLine = el('div', 'sh-new-to-line')
+  toLine.append(el('span', 'sh-compose-label', 'To'), chips, toInput, addBtn, pick)
+  toRow.append(toLine, toError, toHint)
+  body.append(toRow)
+
+  const paintTo = (): void => {
+    chips.replaceChildren()
+    for (const r of recipients) {
+      const chip = el('span', `evm-badge ${r.known ? 'evm-badge--purple' : 'evm-badge--neutral'} sh-new-to-chip`, r.label)
+      chip.setAttribute('data-testid', 'new-to-chip')
+      chip.setAttribute('data-ek', r.ek)
+      chip.title = r.known
+        ? `${r.npub}\nThe key their own signed letters name.`
+        : `${r.npub}\nA key you typed in. Nothing proves whose it is.`
+      const x = el('button', 'sh-new-to-chip-x', '✕') as HTMLButtonElement
+      x.title = 'Remove'
+      x.setAttribute('aria-label', `Remove ${r.label}`)
+      x.addEventListener('click', () => {
+        recipients.splice(recipients.indexOf(r), 1)
+        paintTo()
+      })
+      chip.append(x)
+      chips.append(chip)
+    }
+    const priv = recipients.length > 0
+    titleEl.textContent = priv ? 'New private letter' : 'New'
+    modal.classList.toggle('sh-new-modal--private', priv)
+    fromHtml.hidden = priv
+    toHint.textContent = priv
+      ? 'Sealed when you publish: only these people, and you, can open it. Any of them can pass it on, with your signature intact. Until then the draft is saved unencrypted on this computer, like every draft.'
+      : 'Optional. Leave empty for a public letter; add people to seal it so only they can open it.'
+  }
+  const add = async (text: string): Promise<void> => {
+    toError.textContent = ''
+    if (!text.trim()) return
+    const r = await shell.resolveRecipient(text.trim())
+    if ('error' in r) {
+      toError.textContent = r.error
+      return
+    }
+    if (!recipients.some((x) => x.ek === r.ek)) recipients.push(r)
+    toInput.value = ''
+    paintTo()
+  }
+  addBtn.addEventListener('click', () => void add(toInput.value))
+  toInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      void add(toInput.value)
+    }
+  })
+  pick.addEventListener('change', () => {
+    const v = pick.value
+    pick.value = ''
+    void add(v)
+  })
 
   for (const entry of types) {
     const btn = el('button', 'evm-btn evm-btn--ghost sh-new-type')
@@ -889,7 +990,7 @@ async function openNewMenu(): Promise<void> {
     )
     btn.addEventListener('click', async () => {
       overlay.remove()
-      const r = await shell.newDraft(entry.key)
+      const r = await shell.newDraft(entry.key, undefined, recipients.length > 0 ? recipients.map((x) => x.ek) : undefined)
       if (!r.id) {
         showText(`Could not start a draft: ${String(r.error ?? 'unknown type')}`, 'danger')
         return
@@ -907,6 +1008,8 @@ async function openNewMenu(): Promise<void> {
     openComposeModal()
   })
   body.append(fromHtml)
+  for (const r of preset) if (!recipients.some((x) => x.ek === r.ek)) recipients.push(r)
+  paintTo()
 
   const footer = el('div', 'evm-modal-footer')
   const cancel = el('button', 'evm-btn evm-btn--ghost', 'Cancel')
@@ -2341,7 +2444,20 @@ function openPeopleModal(): void {
             overlay.remove() // the draft is now open; get out of its way
           })
         })
-        actions.append(btn, vouch)
+        const write = el('button', 'evm-btn evm-btn--ghost evm-btn--sm', 'Write privately…') as HTMLButtonElement
+        write.setAttribute('data-testid', 'people-write')
+        write.disabled = !r.sealable
+        write.title = r.sealable
+          ? 'Start a letter sealed to them, so only they and you can open it.'
+          : 'None of their letters you hold names a private-letter key. Ask them for their npub and type it into New.'
+        write.addEventListener('click', () => {
+          void shell.resolveRecipient(`0x${r.authorKey}`).then((res) => {
+            if ('error' in res) return showText(res.error, 'danger')
+            overlay.remove()
+            void openNewMenu([res])
+          })
+        })
+        actions.append(btn, vouch, write)
       }
       row.append(nameEl, ...own, count, actions)
 
@@ -3235,6 +3351,25 @@ function renderHeader(h: HeaderFacts | null): void {
     authorEl.addEventListener('click', () => openPetnameModal(h.authorScheme, h.authorKey, h.petname ?? null))
   }
   const typeBadge = el('span', 'evm-badge evm-badge--neutral', h.type)
+  // Private: a draft says who it will be sealed to, and that it is not
+  // sealed yet; a sealed letter says it is one.
+  const privateBits: HTMLElement[] = []
+  if (h.draft && h.privateTo && h.privateTo.length > 0) {
+    const b = el('span', 'evm-badge evm-badge--purple sh-private', `Private · to ${h.privateTo.join(', ')}`)
+    b.setAttribute('data-testid', 'header-private')
+    b.title =
+      'Sealed when you publish, so only these people and you can open it. Any of them can pass it on, with your signature intact.'
+    const note = el('span', 'sh-hint sh-private-note', 'unencrypted here until sent')
+    note.setAttribute('data-testid', 'header-private-note')
+    note.title = 'Like every draft, this one is saved as you type, in the clear, on this computer. Publishing seals it and removes the draft.'
+    privateBits.push(b, note)
+  } else if (!h.draft && h.sealed) {
+    const b = el('span', 'evm-badge evm-badge--purple sh-private', 'Private')
+    b.setAttribute('data-testid', 'header-sealed')
+    b.title =
+      'Sealed: only the people it was sealed to can open it, and nobody else can tell who they are. Any of them can pass it on, with the signature intact.'
+    privateBits.push(b)
+  }
   const hashEl = el('span', 'sh-hash evm-address evm-address--muted', short(h.envelopeHash, 8))
   // Copy: the shell-level "edit this object" primitive — things are immutable,
   // so editing starts by making your own instance with the same program+args.
@@ -3306,10 +3441,12 @@ function renderHeader(h: HeaderFacts | null): void {
   let commentEl: HTMLElement | null = null
   let groupChip: HTMLElement | null = null
   if (!h.draft) {
-    const commentBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Comment')
-    commentBtn.setAttribute('data-testid', 'header-comment')
+    // A public comment on a private letter would name it for everyone and
+    // say you received it; the reply to one is sealed to its author.
+    const commentBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', h.sealed ? 'Reply privately' : 'Comment')
+    commentBtn.setAttribute('data-testid', h.sealed ? 'header-reply-private' : 'header-comment')
     commentBtn.addEventListener('click', async () => {
-      const r = await shell.newComment(h.envelopeHash)
+      const r = h.sealed ? await shell.newPrivateReply(h.envelopeHash) : await shell.newComment(h.envelopeHash)
       if (!r.id) {
         showText(`Could not start a comment: ${String(r.error ?? 'unknown')}`, 'danger')
         return
@@ -3545,6 +3682,7 @@ function renderHeader(h: HeaderFacts | null): void {
     authorEl,
     ...seatBits,
     typeBadge,
+    ...privateBits,
     renderModeToggle(),
     pub,
     el('span', 'sh-spacer'),
@@ -3743,8 +3881,10 @@ shell.onConfirmRequest((req) => {
   const header = el('div', 'evm-modal-header')
   // 'publish' is user-initiated (the chrome Publish button signing the
   // previewed draft); anything else would be a thing's own request.
-  const title =
-    req.kind === 'publish'
+  const sealing = req.kind === 'publish' && Array.isArray(req.summary.recipients) && req.summary.recipients.length > 0
+  const title = sealing
+    ? 'Seal and send this private letter?'
+    : req.kind === 'publish'
       ? 'Publish a new instance?'
       : req.kind === 'cosign'
         ? 'Add your signature to this document?'
@@ -3755,11 +3895,13 @@ shell.onConfirmRequest((req) => {
     el(
       'p',
       'sh-hint',
-      req.kind === 'publish'
-        ? 'This signs the previewed draft with your identity as a new letter in your feed. Nothing happens until you approve it here.'
-        : req.kind === 'cosign'
-          ? 'This signs the exact document below with your identity — the same bytes the earlier signers signed, unchanged. Your signature is public, permanent, and cannot be withdrawn.'
-          : 'This request grants nothing until you approve it here.'
+      sealing
+        ? 'This signs the previewed draft with your identity, then seals it so only the people below can open it. Nothing happens until you approve it here.'
+        : req.kind === 'publish'
+          ? 'This signs the previewed draft with your identity as a new letter in your feed. Nothing happens until you approve it here.'
+          : req.kind === 'cosign'
+            ? 'This signs the exact document below with your identity — the same bytes the earlier signers signed, unchanged. Your signature is public, permanent, and cannot be withdrawn.'
+            : 'This request grants nothing until you approve it here.'
     )
   )
   // Co-signing is the one confirm where being NAMED matters, and where the
@@ -3774,8 +3916,27 @@ shell.onConfirmRequest((req) => {
       : 'This document does not name you as a signatory. You may still sign it, and your signature will be just as real; it will simply be recorded as one the document did not ask for.'
     body.append(note)
   }
+  // A private letter: who can open it, and the one thing a seal cannot do.
+  const to = Array.isArray(req.summary.recipients) ? (req.summary.recipients as { label: string; npub: string; known: boolean }[]) : []
+  if (req.kind === 'publish' && to.length > 0) {
+    const box = el('div', 'sh-confirm-private')
+    box.setAttribute('data-testid', 'confirm-private')
+    box.append(el('p', 'sh-confirm-private-to', `Sealed to ${to.map((r) => r.label).join(', ')}, and you.`))
+    const unknown = to.filter((r) => !r.known)
+    if (unknown.length > 0) {
+      box.append(
+        el('p', 'sh-hint', `${unknown.map((r) => r.label).join(', ')}: typed in, not taken from a letter of theirs. Check the key is right; a sealed letter cannot be taken back.`)
+      )
+    }
+    const fwd = el('p', 'sh-confirm-forward', 'Anyone you send this to can forward it, with your signature intact.')
+    fwd.setAttribute('data-testid', 'confirm-forward')
+    box.append(fwd)
+    body.append(box)
+  }
+  const shown = { ...req.summary }
+  if (to.length === 0) delete shown.recipients
   const pre = el('pre', 'sh-draft') as HTMLPreElement
-  pre.textContent = JSON.stringify(req.summary, null, 2)
+  pre.textContent = JSON.stringify(shown, null, 2)
   body.append(pre)
   const footer = el('div', 'evm-modal-footer')
   const cancel = el('button', 'evm-btn evm-btn--ghost', 'Reject')

@@ -50,6 +50,8 @@ export type CageEvent =
   | { type: 'welcome-rejected'; reason: string }
   // A letter of ours in the joined forum that could not be posted to its relays.
   | { type: 'forum-post-failed'; hash: string; reason: string }
+  // Sealed letters could not be reopened at startup; each still reopens when opened.
+  | { type: 'reopen-sealed-failed'; reason: string }
 
 /** TEST-ONLY payload capture. A separate buffer that DOES retain emit payloads
  *  so the Playwright suite can assert on them. Populated only when

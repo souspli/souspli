@@ -58,6 +58,7 @@ export {
   parseTar,
   packBundle,
   buildBundle,
+  buildSealedBundle,
   cosignBundle,
   chainInfo,
   DEFAULT_BUNDLE_LIMITS,
