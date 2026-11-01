@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto'
-import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createHash, randomBytes } from 'node:crypto'
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { Readable } from 'node:stream'
 
@@ -58,14 +58,47 @@ export class CasStore implements AttachmentStore {
   constructor(dir: string) {
     this.blobsDir = join(dir, 'blobs')
     mkdirSync(this.blobsDir, { recursive: true })
+    // One process per store (the single-instance lock), so any temporary
+    // file here is from a write that was killed.
+    this.sweepTemp()
   }
 
-  /** Admission-side write: content-addressed, idempotent. Returns the hash. */
+  /** Admission-side write: content-addressed, idempotent. Returns the hash.
+   *
+   *  All or nothing: the bytes go to a temporary name and are renamed into
+   *  place, so a process killed mid-write (a power cut, or an installer
+   *  closing every copy of the app) leaves no blob at all rather than a
+   *  truncated one under the hash of the whole -- which, since a blob that
+   *  exists is never written again, would stay broken for good. A blob of
+   *  the wrong size, left by a version without this, is rewritten. */
   put(bytes: Uint8Array): string {
     const hash = sha256Hex(bytes)
     const path = join(this.blobsDir, hash)
-    if (!existsSync(path)) writeFileSync(path, bytes)
+    let size = -1
+    try {
+      size = statSync(path).size
+    } catch {
+      /* absent */
+    }
+    if (size !== bytes.length) {
+      const tmp = join(this.blobsDir, `.tmp-${process.pid}-${randomBytes(6).toString('hex')}`)
+      try {
+        writeFileSync(tmp, bytes)
+        renameSync(tmp, path)
+      } finally {
+        rmSync(tmp, { force: true })
+      }
+    }
     return hash
+  }
+
+  /** Remove temporary files a killed write left behind. */
+  private sweepTemp(): void {
+    try {
+      for (const n of readdirSync(this.blobsDir)) if (n.startsWith('.tmp-')) rmSync(join(this.blobsDir, n), { force: true })
+    } catch {
+      /* nothing to sweep */
+    }
   }
 
   has(hashHex: string): boolean {

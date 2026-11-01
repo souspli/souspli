@@ -262,6 +262,7 @@ const shell = {
   updateSetPref: (p: 'on' | 'off'): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:update-set-pref', p),
   updateDownload: (): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:update-download'),
   updateInstall: (): Promise<boolean> => ipcRenderer.invoke('shell:update-install'),
+  updateInstallPlan: (): Promise<{ others: (string | null)[] }> => ipcRenderer.invoke('shell:update-install-plan'),
   updateOpenRelease: (): Promise<boolean> => ipcRenderer.invoke('shell:update-open-release'),
   /** Main pushes the update state as it changes (found, progress, ready). */
   onUpdateState: (cb: (s: Record<string, unknown>) => void): void => {
