@@ -130,8 +130,23 @@ export interface FeedQuery {
    *  with the title of what it answers. The other half of rollUp -- the feed
    *  folds replies away, and this is where they are listed on their own. */
   replies?: boolean
+  /** Find by who wrote it: a key fragment (`0x3f2a`, or `0xd879…5632` as a
+   *  prefix and a suffix) or a name -- your petname for them, the name they
+   *  gave themselves (nametag, card), or a name others gave them (a roster, a
+   *  vouch). Case-insensitive. Others' names are their claims, and match only
+   *  because a search should find what the human remembers. */
+  who?: string
+  /** Only letters addressed to this key, never its own: sealed letters (a
+   *  stored sealed row is one this key could open), and public letters that
+   *  name it as a contract's signer, a group's member, or a vouch's subject. */
+  toMe?: { scheme: string; key: string }
   limit?: number
   offset?: number
+}
+
+/** A LIKE pattern matching `text` literally anywhere (\ is the escape). */
+function likeAnywhere(text: string): string {
+  return `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`
 }
 
 /** Ids of local drafts are namespaced so they can never be confused with an
@@ -1126,6 +1141,41 @@ export class Library {
         )`
       )
     }
+    if (query.who && query.who.trim()) {
+      const w = query.who.trim()
+      const either: string[] = []
+      // A key fragment: hex, with 0x and a shortAddress-style ellipsis allowed.
+      const hexy = /^(0x)?[0-9a-f]{3,}((…|\.\.\.)[0-9a-f]*)?$/i.test(w)
+      if (hexy) {
+        const [pre, suf] = w.replace(/^0x/i, '').toLowerCase().split(/…|\.\.\./)
+        either.push('t.author_key LIKE ?')
+        params.push(suf !== undefined ? `${pre}%${suf}` : `%${pre}%`)
+      }
+      const like = likeAnywhere(w)
+      either.push(
+        `p.name LIKE ? ESCAPE '\\'`,
+        `EXISTS (SELECT 1 FROM things n JOIN titles ti ON ti.envelope_hash = n.envelope_hash
+                  WHERE n.author_scheme = t.author_scheme AND n.author_key = t.author_key
+                    AND n.type IN ('nametag', 'card') AND ti.title LIKE ? ESCAPE '\\')`,
+        `EXISTS (SELECT 1 FROM group_members g
+                  WHERE g.scheme = t.author_scheme AND g.key = t.author_key AND g.name LIKE ? ESCAPE '\\')`,
+        `EXISTS (SELECT 1 FROM vouches v
+                  WHERE v.about_scheme = t.author_scheme AND v.about_key = t.author_key AND v.name LIKE ? ESCAPE '\\')`
+      )
+      params.push(like, like, like, like)
+      where.push(`(${either.join(' OR ')})`)
+    }
+    if (query.toMe) {
+      const { scheme, key } = query.toMe
+      where.push(
+        `NOT (t.author_scheme = ? AND t.author_key = ?)`,
+        `(t.sealed = 1
+          OR EXISTS (SELECT 1 FROM doc_signers d WHERE d.manifest_hash = t.manifest_hash AND d.scheme = ? AND d.key = ?)
+          OR EXISTS (SELECT 1 FROM group_members g WHERE g.envelope_hash = t.envelope_hash AND g.scheme = ? AND g.key = ?)
+          OR EXISTS (SELECT 1 FROM vouches v WHERE v.envelope_hash = t.envelope_hash AND v.about_scheme = ? AND v.about_key = ?))`
+      )
+      params.push(scheme, key, scheme, key, scheme, key, scheme, key)
+    }
     if (query.replies) {
       where.push(`t.type != 'vote'`)
       where.push(`EXISTS (SELECT 1 FROM refs rq WHERE rq.envelope_hash = t.envelope_hash AND rq.rel = 'replyTo')`)
@@ -1794,11 +1844,25 @@ export class Library {
 
   /** Every key that has authored something here, with your name for it and how
    *  much of what you hold came from it. The People view's whole content. */
-  people(): { authorScheme: string; authorKey: string; name: string | null; note: string; things: number; lastSeen: number }[] {
+  people(): {
+    authorScheme: string
+    authorKey: string
+    name: string | null
+    selfName: string | null
+    note: string
+    things: number
+    lastSeen: number
+  }[] {
+    // selfName is the name they gave themselves, newest nametag or card -- a
+    // claim, shown as theirs and never in place of your own name for them.
     const rows = this.db
       .prepare(
         `SELECT t.author_scheme, t.author_key, COUNT(*) AS things, MAX(t.received_at) AS last_seen,
-                p.name AS name, p.note AS note
+                p.name AS name, p.note AS note,
+                (SELECT ti.title FROM things n JOIN titles ti ON ti.envelope_hash = n.envelope_hash
+                  WHERE n.author_scheme = t.author_scheme AND n.author_key = t.author_key
+                    AND n.type IN ('nametag', 'card') AND ti.title != ''
+                  ORDER BY n.created DESC, n.rowid DESC LIMIT 1) AS self_name
            FROM things t
            LEFT JOIN petnames p ON p.author_scheme = t.author_scheme AND p.author_key = t.author_key
           GROUP BY t.author_scheme, t.author_key
@@ -1811,11 +1875,13 @@ export class Library {
       last_seen: number
       name: string | null
       note: string | null
+      self_name: string | null
     }[]
     return rows.map((r) => ({
       authorScheme: r.author_scheme,
       authorKey: r.author_key,
       name: r.name,
+      selfName: r.self_name,
       note: r.note ?? '',
       things: r.things,
       lastSeen: r.last_seen

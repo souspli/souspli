@@ -62,7 +62,7 @@ const shell = {
   /** Start an attestation about a thing, and read the ones pointing at it. */
   /** Everyone whose things you hold, and YOUR name for them. Local only. */
   people: (): Promise<
-    { authorScheme: string; authorKey: string; name: string | null; note: string; things: number; lastSeen: number }[]
+    { authorScheme: string; authorKey: string; name: string | null; selfName: string | null; note: string; things: number; lastSeen: number }[]
   > => ipcRenderer.invoke('shell:people'),
   setPetname: (p: { scheme: string; key: string; name: string; note?: string }): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('shell:set-petname', p),

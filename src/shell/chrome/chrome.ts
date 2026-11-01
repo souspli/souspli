@@ -74,7 +74,7 @@ interface ShellApi extends ForumApi {
   newComment(targetHash: string): Promise<{ id?: string; error?: string }>
   newAttestation(targetHash: string): Promise<{ id?: string; error?: string }>
   people(): Promise<
-    { authorScheme: string; authorKey: string; name: string | null; note: string; things: number; lastSeen: number }[]
+    { authorScheme: string; authorKey: string; name: string | null; selfName: string | null; note: string; things: number; lastSeen: number }[]
   >
   setPetname(p: { scheme: string; key: string; name: string; note?: string }): Promise<{ ok: boolean }>
   onOpenPeople(cb: () => void): void
@@ -290,6 +290,25 @@ const thingHeader = el('div', 'sh-thing-header')
 const cageArea = el('div', 'sh-cage-area') // the native cage view is composited over this
 main.append(thingHeader, cageArea)
 app.append(topbar, feedPane, main)
+
+// The feed is three parts, and only two are rebuilt: the find box sits between
+// them so a live refresh (a letter arriving, a relay offer) never takes the
+// focus, the caret or a half-typed name away from the person typing.
+const feedTop = el('div', 'sh-feed-top')
+const feedFind = el('div', 'sh-feed-find')
+const feedList = el('div', 'sh-feed-list')
+const feedWhoInput = el('input', 'evm-input sh-feed-find-input') as HTMLInputElement
+feedWhoInput.type = 'search'
+feedWhoInput.placeholder = 'Find by key or name'
+feedWhoInput.spellcheck = false
+feedWhoInput.setAttribute('data-testid', 'feed-who')
+feedWhoInput.setAttribute('aria-label', 'Find letters by key or name')
+const feedWhoClear = el('button', 'evm-btn evm-btn--ghost evm-btn--sm sh-feed-find-clear', '✕') as HTMLButtonElement
+feedWhoClear.setAttribute('data-testid', 'feed-who-clear')
+feedWhoClear.title = 'Clear'
+feedWhoClear.hidden = true
+feedFind.append(feedWhoInput, feedWhoClear)
+feedPane.append(feedTop, feedFind, feedList)
 
 // ── Omnibar ──────────────────────────────────────────────────────────────────
 const identityEl = el('span', 'evm-address evm-address--muted', 'loading…')
@@ -1192,7 +1211,10 @@ let selected: string | null = null
  *  Used ONLY to label rows as yours — the comparison is on the admitted
  *  envelope's author key, so it says what the signature says. */
 let myAuthorKey: string | null = null
-let feedScope: 'all' | 'mine' | 'replies' = 'all'
+type FeedScope = 'all' | 'mine' | 'to' | 'replies'
+let feedScope: FeedScope = 'all'
+/** The find box: a key fragment or a name, matched by the library. */
+let feedWho = ''
 
 /** Is this row signed by the identity currently loaded in this shell? */
 /** How an author is written, everywhere one appears.
@@ -1315,6 +1337,8 @@ function titleLine(title: unknown): HTMLElement | null {
  *  column lines up across rows regardless of how long the type name is. */
 function thingItem(row: ThingRow): HTMLElement {
   const item = el('button', 'sh-feed-item')
+  item.setAttribute('data-author-key', row.authorKey)
+  item.setAttribute('data-type', row.type)
   if (row.envelopeHash === selected) item.classList.add('sh-feed-item--active')
   const line1 = el('div', 'sh-feed-line')
   // Your own things read "by you" rather than your address — the whole point
@@ -1461,7 +1485,7 @@ function draftItem(d: DraftRow): HTMLElement {
  *  the set changes, truthfully. */
 function feedFilter(): HTMLElement {
   const wrap = el('span', 'sh-feed-filter')
-  const mk = (scope: 'all' | 'mine' | 'replies', label: string): HTMLElement => {
+  const mk = (scope: FeedScope, label: string): HTMLElement => {
     const b = el('button', 'evm-btn evm-btn--ghost evm-btn--sm sh-feed-filter-btn', label)
     b.setAttribute('data-testid', `feed-filter-${scope}`)
     if (feedScope === scope) b.classList.add('sh-feed-filter-btn--active')
@@ -1473,9 +1497,55 @@ function feedFilter(): HTMLElement {
     })
     return b
   }
-  wrap.append(mk('all', 'All'), mk('mine', 'Mine'), mk('replies', 'Replies'))
+  wrap.append(mk('all', 'All'), mk('mine', 'Mine'), mk('to', 'To you'), mk('replies', 'Replies'))
   return wrap
 }
+
+let feedWhoTimer: ReturnType<typeof setTimeout> | null = null
+feedWhoInput.addEventListener('input', () => {
+  feedWhoClear.hidden = feedWhoInput.value === ''
+  if (feedWhoTimer) clearTimeout(feedWhoTimer)
+  feedWhoTimer = setTimeout(() => {
+    feedWhoTimer = null
+    if (feedWhoInput.value.trim() === feedWhoText()) return
+    feedWho = feedWhoInput.value
+    void refreshFeed()
+  }, 250)
+})
+feedWhoInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && feedWhoInput.value) {
+    e.stopPropagation()
+    setFeedWho('')
+  }
+})
+feedWhoClear.addEventListener('click', () => {
+  setFeedWho('')
+  feedWhoInput.focus()
+})
+
+function feedWhoText(): string {
+  return feedWho.trim()
+}
+
+/** Put `text` in the find box and refresh now (no debounce: it was chosen,
+ *  not typed). */
+function setFeedWho(text: string): void {
+  if (feedWhoTimer) clearTimeout(feedWhoTimer)
+  feedWhoTimer = null
+  feedWho = text
+  feedWhoInput.value = text
+  feedWhoClear.hidden = text === ''
+  void refreshFeed()
+}
+
+/** How the find text is written back in the header: a full address is long,
+ *  so it is shortened the way addresses are everywhere else. */
+function feedWhoLabel(): string {
+  const w = feedWhoText()
+  return /^0x[0-9a-f]{40,}$/i.test(w) ? short(w) : `“${w.length > 24 ? `${w.slice(0, 24)}…` : w}”`
+}
+
+let feedSeq = 0
 
 async function refreshFeed(): Promise<void> {
   // "Mine" is a library-side author filter; with no identity yet (boot race)
@@ -1485,21 +1555,31 @@ async function refreshFeed(): Promise<void> {
   // a memo addressed to you off the bottom of the list.
   // Replies is the other half: the comments the rolled-up feed folds away,
   // as rows of their own, each saying what it answers.
-  const query =
+  // To you is not rolled up: a reply addressed to you IS the thing you want,
+  // not activity under somebody else's post.
+  const scoped =
     feedScope === 'replies'
       ? { replies: true }
-      : feedScope === 'mine' && myAuthorKey
-        ? { author: myAuthorKey, rollUp: true }
-        : { rollUp: true }
+      : feedScope === 'to'
+        ? { toMe: true }
+        : feedScope === 'mine' && myAuthorKey
+          ? { author: myAuthorKey, rollUp: true }
+          : { rollUp: true }
+  const who = feedWhoText()
+  const query = who ? { ...scoped, who } : scoped
+  // Typing fires refreshes back to back; only the newest may paint.
+  const seq = ++feedSeq
   const [drafts, rows, offers] = await Promise.all([shell.drafts(), shell.feed(query), shell.offers()])
-  feedPane.replaceChildren()
+  if (seq !== feedSeq) return
+  feedTop.replaceChildren()
+  feedList.replaceChildren()
   // Drafts are yours by definition and are never published, so the Mine/All
   // scope does not apply to them — they always show.
   if (drafts.length > 0) {
     const title = el('div', 'sh-feed-title', `Drafts · ${drafts.length}`)
     title.setAttribute('data-testid', 'feed-drafts-title')
-    feedPane.append(title)
-    for (const d of drafts) feedPane.append(draftItem(d))
+    feedTop.append(title)
+    for (const d of drafts) feedTop.append(draftItem(d))
   }
   // Offered: things a relay said exist that are not here. A draft in reverse,
   // and shown the same way — its own section, never mixed into the feed, so
@@ -1509,28 +1589,36 @@ async function refreshFeed(): Promise<void> {
     const title = el('div', 'sh-feed-title', `Offered · ${offers.length}`)
     title.setAttribute('data-testid', 'feed-offers-title')
     title.title = 'Letters a relay says exist. Nothing has been downloaded — pressing Fetch is what contacts anybody.'
-    feedPane.append(title)
-    for (const o of offers) feedPane.append(offerItem(o))
+    feedTop.append(title)
+    for (const o of offers) feedTop.append(offerItem(o))
   }
   const head = el('div', 'sh-feed-title sh-feed-head')
-  head.append(
-    el('span', undefined, `${feedScope === 'mine' ? 'By you' : feedScope === 'replies' ? 'Replies' : 'Feed'} · ${rows.length}`),
-    feedFilter()
-  )
-  feedPane.append(head)
+  const scopeLabel = feedScope === 'mine' ? 'By you' : feedScope === 'to' ? 'To you' : feedScope === 'replies' ? 'Replies' : 'Feed'
+  // The find text keeps its own case: the head is small caps, a key is not.
+  const headLabel = el('span', undefined, `${scopeLabel} · `)
+  if (who) headLabel.append(el('span', 'sh-feed-head-who', feedWhoLabel()), ' · ')
+  headLabel.append(String(rows.length))
+  headLabel.setAttribute('data-testid', 'feed-head-label')
+  head.append(headLabel, feedFilter())
+  feedTop.append(head)
   if (rows.length === 0) {
-    const empty =
-      feedScope === 'mine'
+    const empty = who
+      ? `Nothing ${feedScope === 'all' ? '' : `in ${scopeLabel} `}from anyone matching ${feedWhoLabel()}. A key, part of one, or a name — yours for them, or theirs.`
+      : feedScope === 'mine'
         ? 'Nothing published by you yet.'
-        : feedScope === 'replies'
-          ? 'No replies yet.'
-        : drafts.length > 0
-          ? 'Nothing published yet.'
-          : 'Nothing yet. Press New to make something.'
-    feedPane.append(el('div', 'evm-empty', empty))
+        : feedScope === 'to'
+          ? 'Nothing addressed to you yet: no private letters, and nothing naming your key.'
+          : feedScope === 'replies'
+            ? 'No replies yet.'
+            : drafts.length > 0
+              ? 'Nothing published yet.'
+              : 'Nothing yet. Press New to make something.'
+    const e = el('div', 'evm-empty', empty)
+    e.setAttribute('data-testid', 'feed-empty')
+    feedList.append(e)
     return
   }
-  for (const row of rows) feedPane.append(thingItem(row))
+  for (const row of rows) feedList.append(thingItem(row))
 }
 
 // ── View | Edit mode toggle ──────────────────────────────────────────────────
@@ -2211,7 +2299,27 @@ function openPeopleModal(): void {
       const lab = authorLabel({ authorScheme: r.authorScheme, authorKey: r.authorKey, petname: r.name })
       const nameEl = el('span', lab.named ? 'sh-name sh-name--pet' : 'evm-address evm-address--muted', lab.text)
       nameEl.setAttribute('title', lab.title)
-      const count = el('span', 'sh-hint', r.things === 1 ? '1 letter' : `${r.things} letters`)
+      // Their own name for themselves, beside yours: a claim, so it is quoted
+      // and labelled, and never replaces what you call them.
+      const own: HTMLElement[] = []
+      if (r.selfName && r.selfName !== r.name) {
+        const o = el('span', 'sh-people-self', `“${r.selfName}”`)
+        o.setAttribute('data-testid', 'people-self-name')
+        o.title = 'The name this key gave itself. Anyone can claim any name.'
+        own.push(o)
+      }
+      // The count opens the feed on just this key, by its full address -- a
+      // name could match somebody else too.
+      const count = el('span', 'sh-hint')
+      const letters = el('button', 'sh-people-letters', r.things === 1 ? '1 letter' : `${r.things} letters`) as HTMLButtonElement
+      letters.setAttribute('data-testid', 'people-letters')
+      letters.title = 'Show these in the feed'
+      letters.addEventListener('click', () => {
+        overlay.remove()
+        feedScope = 'all'
+        setFeedWho(`0x${r.authorKey}`)
+      })
+      count.append(letters)
       const mine = isMine(r)
       const btn = el('button', 'evm-btn evm-btn--ghost evm-btn--sm', r.name ? 'Rename' : 'Name…') as HTMLButtonElement
       btn.setAttribute('data-testid', 'people-name')
@@ -2235,7 +2343,7 @@ function openPeopleModal(): void {
         })
         actions.append(btn, vouch)
       }
-      row.append(nameEl, count, actions)
+      row.append(nameEl, ...own, count, actions)
 
       // Who already vouches for this key, and how much of that reaches YOU.
       const st = standing[i]

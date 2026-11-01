@@ -3,7 +3,28 @@
 Souspli has no usernames, no follower counts and no reputation score. It has keys,
 and three ways of attaching meaning to them — each deliberately different.
 
-**File → People…** lists every key whose letters you hold.
+**File → People…** lists every key whose letters you hold, with the name each one
+gave itself, in quotes, if it has signed a nametag or card. That name is their own
+claim. Anyone can pick any name, so it never replaces yours for them.
+
+## Finding someone
+
+The **find box** above the feed takes either of these:
+
+- **Part of a key.** The start (`0x3f2a`), or a start and an end as the app shortens
+  addresses (`0xd879…5632`).
+- **A name.** Your petname for them, the name they gave themselves, or a name someone
+  else gave them on a roster or in a vouch. Case doesn't matter.
+
+Names from other people are claims, so matching one doesn't prove the letter is
+from who you meant. The key is beside every row. To be sure, search by key.
+
+The letter count beside each person in People is a link. Press it to fill the find
+box with that person's full address and see everything you hold from them.
+
+**To you**, beside All, Mine and Replies, lists letters addressed to you and none
+you wrote: private letters you can open, plus public ones that name your key (a
+vouch about you, a contract you're asked to sign, a group that lists you).
 
 ## Petnames: private
 

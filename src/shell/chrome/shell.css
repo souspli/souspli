@@ -345,6 +345,13 @@ body {
                  border-top: 1px solid var(--evm-border); padding: var(--evm-space-2) 0; flex-wrap: wrap; }
 .sh-people-row > .sh-hint { flex: 1; }
 .sh-people-note { flex-basis: 100%; font-size: var(--evm-text-sm); color: var(--evm-text-3); }
+/* Their own name for themselves: quoted and quiet, beside yours. */
+.sh-people-self { color: var(--evm-text-3); font-size: var(--evm-text-sm); white-space: nowrap; }
+/* The letter count opens the feed on this key. */
+.sh-people-letters {
+  background: none; border: 0; padding: 0; font: inherit; color: var(--evm-accent); cursor: pointer;
+}
+.sh-people-letters:hover { text-decoration: underline; }
 .sh-people-actions { display: flex; align-items: center; gap: var(--evm-space-2); }
 
 /* Tribe standing. Deliberately plain: no colour, no tick, nothing that reads
@@ -576,6 +583,23 @@ body {
   justify-content: space-between;
   gap: var(--evm-space-2);
 }
+/* The find box: its own row, never rebuilt by a refresh (see chrome.ts). */
+.sh-feed-find {
+  display: flex;
+  align-items: center;
+  gap: var(--evm-space-1);
+  padding: 0 var(--evm-space-2) var(--evm-space-2);
+}
+.sh-feed-find-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 8px;
+  font-size: var(--evm-text-sm);
+}
+.sh-feed-find-input::-webkit-search-cancel-button { display: none; }
+.sh-feed-find-clear { padding: 1px 6px; }
+.sh-feed-find-clear[hidden] { display: none; }
+.sh-feed-head-who { text-transform: none; letter-spacing: normal; color: var(--evm-text-1); }
 .sh-feed-filter {
   display: inline-flex;
   border: 1px solid var(--evm-border);

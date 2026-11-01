@@ -998,7 +998,7 @@ app.whenReady().then(async () => {
   }
 
   function getFeed(query: unknown): ThingRow[] {
-    const q = (query ?? {}) as {
+    const raw = (query ?? {}) as {
       type?: string
       author?: string
       replyTo?: string
@@ -1007,9 +1007,17 @@ app.whenReady().then(async () => {
       inGroup?: string
       rollUp?: boolean
       replies?: boolean
+      who?: unknown
+      toMe?: unknown
       limit?: number
     }
-    return library.feed(q)
+    const { who, toMe, ...q } = raw
+    return library.feed({
+      ...q,
+      ...(typeof who === 'string' && who.trim() ? { who: who.slice(0, 200) } : {}),
+      // "To you" means THIS shell's identity, never a key the chrome names.
+      ...(toMe === true ? { toMe: { scheme: keyring.signer.scheme, key: myKeyHex() } } : {})
+    })
   }
 
   function notifyModeChanged(mode: ThingMode): void {
