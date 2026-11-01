@@ -131,7 +131,9 @@ test('a private letter reaches only its recipient, survives a restart, and is an
     const letter = outcome.envelopeHash as string
 
     // Alice reads her own copy (she sealed one to herself) ...
-    expect(await alice.openThing(letter)).not.toHaveProperty('error')
+    // Retried: publishing opens the new letter itself, and an open racing it
+    // is "superseded" -- which says nothing about whether she can read it.
+    await expect.poll(async () => (await alice.openThing(letter)).error ?? 'ok', { timeout: 15_000 }).toBe('ok')
     // ... and nothing of it is on her disk in the clear: not in the library,
     // the seed store, the database or its log.
     expect(alice.scanUserData(new TextEncoder().encode(SECRET))).toEqual([])
@@ -145,7 +147,7 @@ test('a private letter reaches only its recipient, survives a restart, and is an
     expect(got).toMatchObject({ status: 'valid', sealed: true, envelopeHash: letter })
     // It is addressed to him.
     expect((await bob.feed({ toMe: true })).map((r) => r.envelopeHash)).toContain(letter)
-    expect(await bob.openThing(letter)).not.toHaveProperty('error')
+    await expect.poll(async () => (await bob.openThing(letter)).error ?? 'ok', { timeout: 15_000 }).toBe('ok')
     await chromeEval(bob, `window.__shellChrome.openThing(${JSON.stringify(letter)})`)
     await expect.poll(() => exists(bob, 'header-sealed'), { timeout: 10_000 }).toBe(true)
     expect(await exists(bob, 'header-reply-private')).toBe(true)
