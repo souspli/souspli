@@ -117,6 +117,8 @@ interface ShellApi extends ForumApi {
   updateSetPref(p: 'on' | 'off'): Promise<UpdateStatus>
   updateDownload(): Promise<UpdateStatus>
   updateInstall(): Promise<boolean>
+  /** Which other open profiles an install would close (null: the default). */
+  updateInstallPlan(): Promise<{ others: (string | null)[] }>
   updateOpenRelease(): Promise<boolean>
   onUpdateState(cb: (s: UpdateStatus) => void): void
   onOpenUpdates(cb: () => void): void
@@ -1241,7 +1243,24 @@ function openUpdatesModal(initial: UpdateStatus, checkNow: boolean): void {
       statusSlot.replaceChildren(line(`Downloading ${s.version}… ${s.percent}%`))
     } else if (s.phase === 'ready') {
       statusSlot.replaceChildren(line(`Version ${s.version} is ready. Souspli will close and reopen.`))
-      show('Restart to update', () => void shell.updateInstall())
+      // The update replaces the app every profile runs from, so it closes
+      // them all. Say which, before doing it.
+      void shell.updateInstallPlan().then(({ others }) => {
+        if (!statusSlot.isConnected) return
+        if (others.length === 0) {
+          show('Restart to update', () => void shell.updateInstall())
+          return
+        }
+        const names = others.map((p) => (p === null ? 'Souspli (the default profile)' : `Souspli - ${p}`))
+        const also = el(
+          'p',
+          'sh-hint',
+          `This also closes ${names.join(', ')}. Each saves its work first, and all of them reopen in the new version.`
+        )
+        also.setAttribute('data-testid', 'update-closes-others')
+        statusSlot.append(also)
+        show(others.length === 1 ? 'Close it and update' : 'Close them and update', () => void shell.updateInstall())
+      })
     } else {
       statusSlot.replaceChildren(line(`Update failed: ${s.message}`, 'sh-warn'))
       show('Try again', () => void shell.updateCheck().then(paint))

@@ -1,10 +1,12 @@
 import { app, BaseWindow, Menu, WebContentsView, ipcMain, protocol, session, dialog, webContents, shell as electronShell } from 'electron'
 import { join } from 'node:path'
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import { AdmissionService } from './admission/index.js'
 import { Keyring, KeyringLoadError } from './keyring/index.js'
-import { nodeContext, parseArgs, profilesDir, readPublicIdentity, runCommand } from './cli.js'
+import { nodeContext, parseArgs, profileName, profilesDir, readPublicIdentity, runCommand } from './cli.js'
+import { InstanceRegistry } from './instances.js'
 import { ethAddressHex, generateMnemonic12, mnemonicToAccounts, validatePrivkeyHex } from './keyring/hd.js'
 import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
@@ -252,6 +254,59 @@ if (CLI_ONLY) {
   queueOpenFiles(thingPathsIn(process.argv))
 }
 
+// ── Other running copies, and updates (see instances.ts) ─────────────────────
+// Every profile's copy records itself in one folder they can all see. The
+// profiles folder when there is one; a test's own data folder otherwise, so
+// parallel tests never see each other; the real profiles folder for everyone
+// else.
+const instances =
+  CLI_ONLY || !singleInstance
+    ? null
+    : new InstanceRegistry(
+        process.env.SHELL_PROFILES_DIR
+          ? join(process.env.SHELL_PROFILES_DIR, '.instances')
+          : process.env.SHELL_USER_DATA_DIR
+            ? join(process.env.SHELL_USER_DATA_DIR, '.instances')
+            : join(profilesDir(DEFAULT_USER_DATA), '.instances'),
+        { pid: process.pid, profile: PROFILE }
+      )
+
+/** Start another copy of this app, as `profile` (null: the default). */
+function launchProfile(profile: string | null): void {
+  const args = profile ? ['--profile', profile] : []
+  // Tests record the launch instead: a process started from inside a test
+  // run would outlive it.
+  if (process.env.SHELL_RELAUNCH_LOG) {
+    appendFileSync(process.env.SHELL_RELAUNCH_LOG, `${JSON.stringify(args)}\n`)
+    return
+  }
+  // An AppImage runs from a mount that goes away with this process: start the
+  // file itself. Unpackaged, Electron needs the entry script before our args.
+  const exe = process.env.APPIMAGE || process.execPath
+  const entry = process.defaultApp && process.argv[1] ? [process.argv[1]] : []
+  spawn(exe, [...entry, ...args], { detached: true, stdio: 'ignore' }).unref()
+}
+
+if (instances) {
+  // What an update closed, reopened. Whatever the installer starts -- the
+  // default profile, on every platform -- reopens the profiles that were open
+  // when it began, and steps aside if it was not one of them.
+  const plan = instances.takeRelaunchPlan(appVersion())
+  if (plan) {
+    // Names are re-checked: the plan is a file, and a file can say anything.
+    for (const p of plan) if (p !== PROFILE && (p === null || profileName(p) === p)) launchProfile(p)
+  }
+  if (plan && !plan.includes(PROFILE)) {
+    noteQuit('relaunched-profiles')
+    app.exit(0)
+  } else {
+    instances.register()
+    // The heartbeat: a record nobody refreshes is treated as gone.
+    setInterval(() => instances.register(), 30_000).unref()
+    process.on('exit', () => instances.unregister())
+  }
+}
+
 /** Raise the window when a second launch hands us a file. Set inside whenReady. */
 let focusMainWindow: (() => void) | null = null
 
@@ -442,6 +497,8 @@ interface ShellSurface {
   newDraft?: (key: string, args?: unknown, recipients?: unknown) => Record<string, unknown>
   resolveRecipient?: (input: string) => Record<string, unknown>
   newPrivateReply?: (targetHash: string) => Record<string, unknown>
+  installPlan?: () => Record<string, unknown>
+  prepareInstall?: (version: string) => Promise<{ closed: (string | null)[] }>
   /** Start a comment draft seeded with the target's hash. */
   newComment?: (targetHash: string) => Record<string, unknown>
   newAttestation?: (targetHash: string) => Record<string, unknown>
@@ -475,6 +532,10 @@ const shell: ShellSurface = { ready: false, lastConfirm: null, lastPublish: null
 let stopAllSeeding: (() => Promise<void>) | null = null
 /** Set once the relay service exists, so before-quit can close the sockets. */
 let stopRelays: (() => void) | null = null
+/** Set once drafts exist: saves the open draft's pending edits. Run on every
+ *  quit -- autosave waits for a pause in typing, and a quit inside that pause
+ *  used to drop the last edits. */
+let flushOnQuit: (() => void) | null = null
 ;(app as unknown as { __shell: ShellSurface }).__shell = shell
 // The bridge/cage event log, readable from OUTSIDE the renderer via
 // `evaluate(({ app }) => app.__cage)` — same surface the cage harness exposes.
@@ -651,6 +712,60 @@ app.whenReady().then(async () => {
     },
     firstCheckMs: numEnv('SHELL_UPDATE_FIRST_CHECK_MS', 30_000)
   })
+  // Saving on quit (see flushOnQuit). Drafts are only ever open in `current`.
+  flushOnQuit = () => {
+    if (current) flushAutosave(current)
+  }
+
+  // Another copy is installing an update and asked this one to make way:
+  // save and quit properly, rather than be killed by the installer (Windows)
+  // or hold the install up until someone notices (macOS).
+  if (instances) {
+    const reg = instances
+    const poll = setInterval(() => {
+      if (!reg.quitRequested()) return
+      clearInterval(poll)
+      noteQuit('update-requested')
+      app.quit()
+    }, 1000)
+    poll.unref()
+  }
+
+  /** The other copies an install would close, as the chrome names them. */
+  const installPlan = (): Record<string, unknown> => ({
+    others: (instances?.others() ?? []).map((o) => o.profile)
+  })
+
+  /** Restart into the downloaded update -- all of the app, not just this copy.
+   *  The other profiles are asked to save and quit first, and what was open
+   *  is written down so the new version can reopen it (instances.ts). */
+  async function installUpdate(): Promise<boolean> {
+    const st = updates.status().state
+    if (st.phase !== 'ready') return false
+    await prepareInstall(st.version)
+    return updates.install()
+  }
+
+  /** Everything an install does before handing over to the installer. */
+  async function prepareInstall(version: string): Promise<{ closed: (string | null)[] }> {
+    const closed: (string | null)[] = []
+    if (instances) {
+      const others = instances.others()
+      closed.push(...others.map((o) => o.profile))
+      instances.writeRelaunchPlan(version, [PROFILE, ...closed])
+      if (others.length > 0) {
+        instances.requestQuit()
+        // They save and go within a second or two. One that does not answer
+        // is hung, and the installer deals with it as it would have anyway.
+        const deadline = Date.now() + 20_000
+        while (instances.others().length > 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 250))
+        instances.clearQuitRequest()
+      }
+    }
+    flushOnQuit?.()
+    return { closed }
+  }
+
   /** What the chrome needs: the pref, the state, and whether to ask. The first-
    *  run question is suppressed under test (SHELL_NO_UPDATE_PROMPT), like the
    *  welcome letter, so specs don't start behind a modal. */
@@ -920,9 +1035,13 @@ app.whenReady().then(async () => {
       // untrue. Envelope hashes are content-derived, so re-ingesting the same
       // bytes -- or authoring something byte-identical to what you already
       // have -- lands here legitimately.
-      const stored = library.store(result, Date.now())
       // Seed the raw admitted bundle so it can be re-served by bundle:<hash>.
+      // FIRST: a process killed between the two then leaves a spare file,
+      // rather than a letter whose original bytes are missing (which, for a
+      // sealed one, is the only way to open it after a restart). A sealed
+      // row whose tar was not yet noted is matched to it at the next start.
       const tarHash = seedStore.put(raw)
+      const stored = library.store(result, Date.now())
       if (result.sealed) library.noteSealedBundle(hex(result.envelopeHash), tarHash)
       // Whatever route it took, holding it settles any offer of it. A pointer
       // fetched, a file dropped in, a bundle pasted -- all the same once the
@@ -1451,7 +1570,7 @@ app.whenReady().then(async () => {
 
   // Autosave. Slower than the 600ms preview debounce so the sqlite write never
   // lands on a remount frame.
-  const AUTOSAVE_DEBOUNCE_MS = 800
+  const AUTOSAVE_DEBOUNCE_MS = numEnv('SHELL_AUTOSAVE_MS', 800)
 
   function flushAutosave(o: OpenThing): boolean {
     const d = o.pendingSave
@@ -3681,7 +3800,8 @@ app.whenReady().then(async () => {
     await updates.download()
     return updateStatus()
   })
-  ipcMain.handle('shell:update-install', () => updates.install())
+  ipcMain.handle('shell:update-install', () => installUpdate())
+  ipcMain.handle('shell:update-install-plan', () => installPlan())
   ipcMain.handle('shell:update-open-release', async () => {
     // The URL is built here from the version the updater found, never taken
     // from the chrome.
@@ -3956,6 +4076,8 @@ app.whenReady().then(async () => {
   shell.newDraft = (key, args, recipients) => newDraft(key, args, recipients)
   shell.resolveRecipient = (input) => resolveRecipient(input)
   shell.newPrivateReply = (targetHash) => newPrivateReply(targetHash)
+  shell.installPlan = () => installPlan()
+  shell.prepareInstall = (version) => prepareInstall(version)
   shell.newComment = (h) => newComment(h)
   shell.newAttestation = (h) => newAttestation(h)
   shell.people = () => library.people()
@@ -4128,6 +4250,11 @@ app.whenReady().then(async () => {
 // closes the sockets -- but leaving the DHT with stale peer records for a shell
 // that is gone is rude to the swarm.
 app.on('before-quit', () => {
+  try {
+    flushOnQuit?.()
+  } catch {
+    /* a failed save must not stop the quit */
+  }
   void stopAllSeeding?.()
   stopRelays?.()
 })

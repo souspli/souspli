@@ -36,6 +36,12 @@ The `.deb` package does not replace itself; Souspli tells you about the new vers
 and opens its release page. The AppImage, the macOS app and the Windows installer
 update in place.
 
+If you have more than one [profile](#from-a-terminal) open, an update closes them
+all, because they all run the same app. The window you install from names the
+others first. Each one saves its work and quits properly, and all of them reopen in
+the new version. On Linux, the AppImage's file name changes to the new version, so
+update any shortcut or command that names the old file.
+
 ## First run
 
 Souspli shows a notice headed **⚠ Experimental alpha** and asks you to acknowledge
