@@ -207,8 +207,14 @@ test('a flood of pointers stays bounded, newest kept', async () => {
       await new Promise((r) => setTimeout(r, 5))
     }
 
-    await expect.poll(async () => (await small.offers()).length, { timeout: 20_000 }).toBe(20)
-    const held = new Set((await small.offers()).map((o) => o.envelopeHash))
+    // Wait for the LAST one, not for the count: the count is 20 from the
+    // twentieth arrival on, while ten more are still on their way.
+    await expect
+      .poll(async () => (await small.offers()).some((o) => o.envelopeHash === hashes[29]), { timeout: 20_000 })
+      .toBe(true)
+    const offers = await small.offers()
+    expect(offers.length).toBe(20)
+    const held = new Set(offers.map((o) => o.envelopeHash))
     expect(held.has(hashes[29]!), 'the newest survived').toBe(true)
     expect(held.has(hashes[0]!), 'the oldest was evicted').toBe(false)
     expect(hits, 'a flood of offers is still a flood of nothing fetched').toEqual([])
