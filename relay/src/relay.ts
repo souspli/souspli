@@ -6,7 +6,7 @@
 // attachment, and everything else is in the object's SQLite storage.
 import { DurableObject } from 'cloudflare:workers'
 import type { Env } from './index'
-import { matches, parseFilter, policyError, shapeError, verifyEvent, type Filter, type NostrEvent, type Policy } from './nostr'
+import { keySet, matches, parseFilter, policyError, rateLimited, shapeError, verifyEvent, type Filter, type NostrEvent, type Policy } from './nostr'
 
 const MAX_SUBS = 4
 const MAX_FILTERS = 4
@@ -54,7 +54,8 @@ export class Relay extends DurableObject<Env> {
   private policy(): Policy {
     return {
       maxContentBytes: Number(this.env.MAX_CONTENT_BYTES) || 45056,
-      blockedPubkeys: new Set(this.env.BLOCKED_PUBKEYS.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean)),
+      blockedPubkeys: keySet(this.env.BLOCKED_PUBKEYS),
+      trustedPubkeys: keySet(this.env.TRUSTED_PUBKEYS),
       maxFutureSeconds: 3600
     }
   }
@@ -120,8 +121,12 @@ export class Relay extends DurableObject<Env> {
       const row = sql.exec('SELECT n FROM rate WHERE key = ? AND hour = ?', key, hour).toArray()[0] as { n: number } | undefined
       return (row?.n ?? 0) >= max
     }
-    if (over(`k:${ev.pubkey}`, Number(this.env.EVENTS_PER_PUBKEY_PER_HOUR) || 60)) return refuse('rate-limited: too many posts from this key this hour')
-    if (over(`a:${att.who}`, Number(this.env.EVENTS_PER_IP_PER_HOUR) || 120)) return refuse('rate-limited: too many posts from this address this hour')
+    // A trusted key (the operator's own publishing bot) skips the limits and
+    // is not counted, so a burst of its posts cannot use up the address's
+    // allowance for anything else sent from the same machine.
+    const limited = rateLimited(ev, this.policy())
+    if (limited && over(`k:${ev.pubkey}`, Number(this.env.EVENTS_PER_PUBKEY_PER_HOUR) || 60)) return refuse('rate-limited: too many posts from this key this hour')
+    if (limited && over(`a:${att.who}`, Number(this.env.EVENTS_PER_IP_PER_HOUR) || 120)) return refuse('rate-limited: too many posts from this address this hour')
 
     if (!verifyEvent(ev)) return refuse('invalid: id or signature does not verify')
 
@@ -130,7 +135,7 @@ export class Relay extends DurableObject<Env> {
     // order does not matter: the id is over a canonical array, not this JSON.)
     const clean: NostrEvent = { id: ev.id, pubkey: ev.pubkey, created_at: ev.created_at, kind: ev.kind, tags: ev.tags, content: ev.content, sig: ev.sig }
     sql.exec('INSERT OR IGNORE INTO events (id, pubkey, created_at, raw) VALUES (?,?,?,?)', ev.id, ev.pubkey, ev.created_at, JSON.stringify(clean))
-    for (const key of [`k:${ev.pubkey}`, `a:${att.who}`]) {
+    for (const key of limited ? [`k:${ev.pubkey}`, `a:${att.who}`] : []) {
       sql.exec('INSERT INTO rate (key, hour, n) VALUES (?,?,1) ON CONFLICT (key, hour) DO UPDATE SET n = n + 1', key, hour)
     }
     sql.exec('DELETE FROM rate WHERE hour < ?', hour - 1)
