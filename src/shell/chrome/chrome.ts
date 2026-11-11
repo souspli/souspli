@@ -34,6 +34,13 @@ interface ShellApi extends ForumApi {
   seedStatus(): Promise<{ envelopeHash: string; magnet: string; peers: number; bytes: number; type: string }[]>
   offers(inGroup?: string): Promise<OfferRow[]>
   fetchOffer(envelopeHash: string): Promise<Record<string, unknown>>
+  subscribe(scheme: string, key: string, feeds: string[] | null): Promise<{ ok?: boolean; error?: string }>
+  unsubscribe(scheme: string, key: string): Promise<{ ok?: boolean; error?: string }>
+  subscriptions(): Promise<{ authorScheme: string; authorKey: string; feeds: string[] | null; feedsOffered: string[] }[]>
+  subscriptionOptions(
+    scheme: string,
+    key: string
+  ): Promise<{ ek: string | null; feedsOffered: string[]; subscription: { feeds: string[] | null } | null; error?: string }>
   vote(envelopeHash: string, dir: 1 | -1 | 0): Promise<Record<string, unknown>>
   votes(envelopeHash: string): Promise<Record<string, number>>
   thread(envelopeHash: string): Promise<{ rows: Record<string, unknown>[]; count: number }>
@@ -2383,6 +2390,124 @@ function openPetnameModal(scheme: string, key: string, current: string | null): 
   name.select()
 }
 
+/** Subscribe to an author: consent, given once, to fetch the pointers their
+ *  relay key posts, instead of a press on each. Optionally starts a private
+ *  memo telling them so — a publishing bot reads those to learn what to send.
+ *  The memo is a normal draft: nothing is signed or sent until you publish it. */
+function openSubscribeModal(scheme: string, key: string, label: string, onDone: () => void): void {
+  const overlay = el('div', 'evm-modal-overlay')
+  const modal = el('div', 'evm-modal sh-subscribe')
+  modal.setAttribute('data-testid', 'subscribe-modal')
+  const header = el('div', 'evm-modal-header')
+  header.append(el('span', 'evm-modal-title', `Subscribe to ${label}`))
+  const body = el('div', 'evm-modal-body')
+  body.append(
+    el(
+      'p',
+      'sh-hint',
+      'New letters they post on your relays are fetched as they appear, instead of waiting for you to press Fetch. Only pointers posted under their own relay key count, and anything that turns out to be signed by someone else is refused.'
+    ),
+    el(
+      'p',
+      'sh-hint',
+      'Fetching a letter connects to whoever serves it — their seed boxes, trackers and other readers see your IP address, as with any Fetch.'
+    )
+  )
+  const feedsBox = el('div', 'sh-subscribe-feeds')
+  feedsBox.setAttribute('data-testid', 'subscribe-feeds')
+  const all = el('input') as HTMLInputElement
+  all.type = 'checkbox'
+  all.checked = true
+  all.setAttribute('data-testid', 'subscribe-all')
+  const allRow = el('label', 'sh-account-row')
+  allRow.append(all, el('span', undefined, 'Everything they post'))
+  const picks: HTMLInputElement[] = []
+  const tell = el('input') as HTMLInputElement
+  tell.type = 'checkbox'
+  tell.checked = true
+  tell.setAttribute('data-testid', 'subscribe-tell')
+  const tellRow = el('label', 'sh-account-row')
+  tellRow.append(tell, el('span', undefined, 'Also write them a private memo saying so'))
+  body.append(allRow, feedsBox, tellRow)
+
+  const footer = el('div', 'evm-modal-footer')
+  const stop = el('button', 'evm-btn evm-btn--ghost', 'Unsubscribe') as HTMLButtonElement
+  stop.setAttribute('data-testid', 'subscribe-stop')
+  stop.style.display = 'none'
+  const cancel = el('button', 'evm-btn evm-btn--ghost', 'Cancel')
+  cancel.addEventListener('click', () => overlay.remove())
+  const save = el('button', 'evm-btn evm-btn--primary', 'Subscribe') as HTMLButtonElement
+  save.setAttribute('data-testid', 'subscribe-save')
+  footer.append(stop, cancel, save)
+
+  const chosen = (): string[] | null => (all.checked ? null : picks.filter((p) => p.checked).map((p) => p.value))
+  const sync = (): void => {
+    for (const p of picks) p.disabled = all.checked
+    const c = chosen()
+    save.disabled = c !== null && c.length === 0
+  }
+  all.addEventListener('change', sync)
+
+  /** A private memo to them, ready to publish: To is set, the subject is the request. */
+  const draftMemo = async (subject: string): Promise<void> => {
+    const to = await shell.resolveRecipient(`0x${key}`)
+    if ('error' in to) return showText(to.error, 'danger')
+    const r = await shell.newDraft('starter:memo', { to: label, subject, message: '', enclosures: [] }, [to.ek])
+    if (r.error || !r.id) return showText(`Could not start the memo: ${r.error ?? 'unknown error'}`, 'danger')
+    document.querySelectorAll('[data-testid="people-modal"]').forEach((m) => m.closest('.evm-modal-overlay')?.remove())
+    await openThing(r.id)
+    showText('Publish the memo to send it — it is sealed to them, and goes through your relays if you tick that.', 'neutral')
+  }
+
+  save.addEventListener('click', async () => {
+    const feeds = chosen()
+    const res = await shell.subscribe(scheme, key, feeds)
+    if (res.error) return showText(`Could not subscribe: ${res.error}`, 'danger')
+    overlay.remove()
+    onDone()
+    if (tell.checked) await draftMemo(`subscribe ${feeds ? feeds.join(' ') : 'all'}`)
+    else showText(`Subscribed. New letters from ${label} are fetched as they arrive.`, 'success')
+  })
+  stop.addEventListener('click', async () => {
+    await shell.unsubscribe(scheme, key)
+    overlay.remove()
+    onDone()
+    if (tell.checked) await draftMemo('unsubscribe all')
+    else showText(`Unsubscribed from ${label}. Their letters wait for you to press Fetch again.`, 'neutral')
+  })
+
+  void shell.subscriptionOptions(scheme, key).then((o) => {
+    if (o.error) return showText(o.error, 'danger')
+    const current = o.subscription
+    const names = [...new Set([...o.feedsOffered, ...(current?.feeds ?? [])])].sort()
+    if (names.length) {
+      feedsBox.append(el('p', 'sh-hint', 'Or only some of what they have offered so far:'))
+      for (const n of names) {
+        const cb = el('input') as HTMLInputElement
+        cb.type = 'checkbox'
+        cb.value = n
+        cb.checked = current?.feeds ? current.feeds.includes(n) : false
+        cb.setAttribute('data-testid', 'subscribe-feed')
+        const row = el('label', 'sh-account-row')
+        row.append(cb, el('span', undefined, n))
+        cb.addEventListener('change', sync)
+        picks.push(cb)
+        feedsBox.append(row)
+      }
+    }
+    if (current) {
+      all.checked = current.feeds === null
+      save.textContent = 'Save'
+      stop.style.display = ''
+    }
+    sync()
+  })
+  sync()
+  modal.append(header, body, footer)
+  overlay.append(modal)
+  document.body.append(trackOverlay(overlay))
+}
+
 /** Everyone whose things you hold, and what you call them.
  *
  *  Deliberately just a list of keys and names: there is no reputation here, no
@@ -2408,7 +2533,7 @@ function openPeopleModal(): void {
   )
 
   const paint = async (): Promise<void> => {
-    const rows = await shell.people().catch(() => [])
+    const [rows, subs] = await Promise.all([shell.people().catch(() => []), shell.subscriptions().catch(() => [])])
     // Standing is per key, so it is fetched alongside rather than joined into
     // people() -- the People list is small and this keeps the query honest.
     const standing = await Promise.all(
@@ -2481,7 +2606,20 @@ function openPeopleModal(): void {
             void openNewMenu([res])
           })
         })
-        actions.append(btn, vouch, write)
+        const subbed = subs.find((x) => x.authorScheme === r.authorScheme && x.authorKey === r.authorKey)
+        const sub = el('button', 'evm-btn evm-btn--ghost evm-btn--sm', subbed ? 'Subscribed…' : 'Subscribe…') as HTMLButtonElement
+        sub.setAttribute('data-testid', 'people-subscribe')
+        sub.setAttribute('data-subscribed', subbed ? 'true' : 'false')
+        sub.disabled = !r.sealable && !subbed
+        sub.title = subbed
+          ? `Fetching ${subbed.feeds ? subbed.feeds.join(', ') : 'everything'} they post, as it arrives. Click to change or stop.`
+          : r.sealable
+            ? 'Fetch what they post on your relays as it arrives, instead of pressing Fetch on each one.'
+            : 'None of their letters you hold names a relay key, so there is nothing to subscribe to.'
+        sub.addEventListener('click', () => {
+          openSubscribeModal(r.authorScheme, r.authorKey, lab.text, () => void paint())
+        })
+        actions.append(btn, vouch, write, sub)
       }
       row.append(nameEl, ...own, count, actions)
 

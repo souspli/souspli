@@ -31,6 +31,7 @@ never installs the desktop app.
 | `created_at` | not more than an hour in the future (a far-future date would deafen readers that follow a cursor) |
 | Rate | `EVENTS_PER_PUBKEY_PER_HOUR` (60) and `EVENTS_PER_IP_PER_HOUR` (120). A sealed letter is posted under a one-time key, so for those only the per-IP limit applies. |
 | Blocking | `BLOCKED_PUBKEYS`, comma-separated hex keys — the operator's only moderation lever |
+| Trust | `TRUSTED_PUBKEYS`, comma-separated hex keys exempt from the hourly limits and not counted against the address they post from — for a publishing bot the operator runs. Everything else (kind, size, signature, blocking) still applies. Empty by default. |
 | Subscriptions | 4 per connection, 4 filters each; stored events are sent **oldest first**, newest `limit` (≤ 1000) |
 
 Moderation of *content* does not happen here. A forum's moderators sign verdicts that
@@ -122,6 +123,24 @@ After that every push to `master` that touches `relay/` redeploys it.
 ```bash
 curl -s -H 'Accept: application/nostr+json' https://relay.souspli.org/ | head -c 200
 pnpm world relay --from alan --to grace --relay wss://relay.souspli.org
+```
+
+### A second relay, for news
+
+`wrangler.jsonc` also declares an environment, `news`: the same code as a separate
+Worker (`souspli-relay-news`) with its own Durable Object, storage and limits. It is
+the relay a publishing bot such as [newsread](https://github.com/gearcat0/newsread)
+announces articles on and reads sealed subscribe letters from, so a news burst never
+competes with forum traffic on `relay.souspli.org`.
+
+1. Change the route in `env.news` to the domain readers should add (it ships as
+   `news-relay.souspli.org`).
+2. Set `TRUSTED_PUBKEYS` to the bot's relay key — `newsread relays` prints it.
+3. `npm run deploy -- --env news` (or a second dashboard Worker with
+   `npx wrangler deploy --env news` as its deploy command).
+
+```bash
+npm run dev -- --env news --port 8797   # locally
 ```
 
 Durable Objects with SQLite storage are available on the Workers **free** plan; at

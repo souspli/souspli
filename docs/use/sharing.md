@@ -58,7 +58,21 @@ relays.
 On the receiving side, letters posted to relays you subscribe to arrive in your feed
 after passing the same checks as any file. A pointer arrives as an **offer**: a row
 saying a letter exists, who offered it, and a **Fetch** button. **Nothing is ever
-downloaded automatically** — not a thumbnail, not a byte — until you press it.
+downloaded automatically** — not a thumbnail, not a byte — until you press it, with
+one exception you make yourself:
+
+**Subscribing.** In **People**, **Subscribe…** on an author means *fetch what they
+post as it appears*. It is for publishers whose letters are all too big to travel
+inline — a news account posting articles with photos. You can choose some of their
+feeds rather than all. Only pointers posted under the relay key that author bound to
+their own letters are followed, and a letter signed by anyone else is refused. The
+dialog can also start a private memo telling them you subscribed, which is how a
+publishing bot learns what to send. **Subscribed… → Unsubscribe** puts the Fetch
+button back.
+
+*Subscribing reveals:* each fetch tells the trackers, seed boxes and webseeds the
+pointer names your IP address and that you fetched this letter — exactly what
+pressing Fetch would.
 
 *Reveals:* posting tells each relay your IP address, and tells the relay and all its
 readers that your key published this letter. Subscribing tells the relay what you

@@ -184,7 +184,7 @@ export function unsealMember(member: Uint8Array, ck: Uint8Array): Uint8Array {
   return xchacha20poly1305(ck, nonce).decrypt(ciphertext)
 }
 
-// ── Sealing (out of scope for the v1 shell; used by tests, kept for LATER) ────
+// ── Sealing (the shell writes sealed letters through buildSealedBundle) ──────
 
 /** Seal an envelope to recipient x-only pubkeys. Returns the Sealed bytes AND
  *  the content key CK, so the caller can encrypt the other bundle members (§7.1)
