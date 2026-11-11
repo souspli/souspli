@@ -71,7 +71,11 @@ Verify-at-the-gate batteries: a transport returning garbage, tampered, oversize 
 never-ending bytes; a relay event whose poster is not the author; an offer whose
 fetched letter is validly signed but is not the one advertised; a resolver that
 points a name at the wrong key. Plus the negative properties: nothing is *posted*
-unasked, and nothing is *fetched* unasked.
+unasked, and nothing is *fetched* unasked: a pointer waits for **Fetch**, unless you
+subscribed to the author whose relay key posted it. Tested (`subscribe.spec.ts`):
+a stranger's pointer is never followed, even beside a subscribed one; a subscribed
+key pointing at another author's validly signed letter is refused and nothing kept;
+only the chosen feeds are fetched; unsubscribing restores the press.
 
 ### A sealed letter sent through a relay does not name its sender
 
@@ -145,6 +149,14 @@ Stated in the [specification §10](../protocol/spec.md) and on the
   drawn inside the author's box, under their self-chosen name, never beside a trust
   signal of the chrome's own. A post's link opens only from main, built from the
   post, http(s) only.
+- **A subscription fetches without a press.** Once you subscribe to an author, every
+  pointer their relay key posts is followed. That key comes from their own public
+  letter (never from an event), and what arrives must be signed by them, within a
+  size cap, at most so many an hour and a few at once, with no automatic retry. But
+  following a pointer contacts whatever it names: their trackers, webseeds and the
+  `.torrent` URL learn your IP address and when you fetch, as a press would tell
+  them. An author whose key is stolen can make subscribers download junk up to the
+  cap until they unsubscribe; admission still refuses anything not validly theirs.
 - **Votes are signed without a confirmation dialog**, on the grounds that the control
   is in the trusted header. If a program could ever cause a vote to be cast, that is
   where it would break.

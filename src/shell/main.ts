@@ -18,6 +18,7 @@ import {
   type DraftBlobInput,
   type DraftRow,
   type StoredThing,
+  type SubscriptionRow,
   type ThingRow
 } from './library/index.js'
 import { sanitizeBody, sanitizeTitle } from './library/title.js'
@@ -480,6 +481,9 @@ interface ShellSurface {
   offers?: (inGroup?: string) => Record<string, unknown>[]
   /** Follow one. The press — nothing else in the shell calls this. */
   fetchOffer?: (envelopeHash: string) => Promise<Record<string, unknown>>
+  subscribe?: (scheme: string, key: string, feeds: string[] | null) => Promise<Record<string, unknown>>
+  unsubscribe?: (scheme: string, key: string) => Record<string, unknown>
+  subscriptions?: () => Record<string, unknown>[]
   /** Relay connections and how far the subscription has read. */
   relays?: () => Record<string, unknown>
   addRelay?: (url: string) => Record<string, unknown>
@@ -1018,7 +1022,11 @@ app.whenReady().then(async () => {
    *  for one thing, and quietly keeping a different one because it happened to
    *  verify is not what they asked for. So the check runs before the store,
    *  and on a mismatch nothing is kept at all. */
-  async function ingestBytes(raw: Uint8Array, expect?: string): Promise<Record<string, unknown>> {
+  async function ingestBytes(
+    raw: Uint8Array,
+    expect?: string,
+    expectAuthor?: { scheme: string; key: string } | null
+  ): Promise<Record<string, unknown>> {
     const result = await admission.admit(raw, keyring.unsealer)
     if (result.status === 'valid' && expect !== undefined && hex(result.envelopeHash) !== expect) {
       return {
@@ -1026,6 +1034,19 @@ app.whenReady().then(async () => {
         reason: `this is a different letter: asked for ${expect.slice(0, 12)}…, got ${hex(result.envelopeHash).slice(0, 12)}…`,
         expected: expect,
         got: hex(result.envelopeHash)
+      }
+    }
+    // Fetched because of a subscription, not a press: the human consented to
+    // ONE author's letters, so a letter signed by anybody else is refused even
+    // if the subscribed relay key pointed at it. Nothing is kept.
+    if (
+      result.status === 'valid' &&
+      expectAuthor &&
+      (result.envelope.author.s !== expectAuthor.scheme || hex(result.envelope.author.k).toLowerCase() !== expectAuthor.key)
+    ) {
+      return {
+        status: 'invalid',
+        reason: `not by the author you subscribed to: signed by ${hex(result.envelope.author.k).slice(0, 12)}…, not ${expectAuthor.key.slice(0, 12)}…`
       }
     }
     if (result.status === 'valid') {
@@ -2940,7 +2961,7 @@ app.whenReady().then(async () => {
   }
 
   /** Begin a download, or join one already running for the same infohash. */
-  async function startTransfer(magnet: string): Promise<Record<string, unknown>> {
+  async function startTransfer(magnet: string, maxBytes = fetchLimits.maxBytes): Promise<Record<string, unknown>> {
     const infoHash = infoHashOf(magnet)
     if (!infoHash) return { status: 'invalid', reason: 'that magnet names no infohash' }
     const id = library.rememberTransfer(randomUUID(), magnet, infoHash, displayNameOf(magnet), Date.now())
@@ -2956,12 +2977,16 @@ app.whenReady().then(async () => {
     const t = seeder.torrentFor(id)
     t?.on('metadata', () => {
       const size = typeof t.length === 'number' ? t.length : 0
-      if (size > fetchLimits.maxBytes) {
+      const cap = Math.min(maxBytes, fetchLimits.maxBytes)
+      if (size > cap) {
         seeder.setDownloadState(
           id,
           'failed',
-          `this is ${Math.round(size / 1048576)} MB, over the ${Math.round(fetchLimits.maxBytes / 1048576)} MB limit a letter may be`
+          `this is ${Math.round(size / 1048576)} MB, over the ${Math.round(cap / 1048576)} MB limit ${cap < fetchLimits.maxBytes ? 'set for this subscription' : 'a letter may be'}`
         )
+        // An offer it was discharging is settled as failed, not left "fetching".
+        const owed = library.offerForTransfer(id)
+        if (owed) library.setOfferState(owed.envelopeHash, 'failed', 'over the size limit')
         library.forgetTransfer(id)
         seeder.cancelDownload(id)
         pushTransfers()
@@ -2998,7 +3023,7 @@ app.whenReady().then(async () => {
       // for -- a magnet is a locator a stranger chose, and the swarm behind it
       // can serve whatever it likes.
       const owed = library.offerForTransfer(id)
-      const outcome = await ingestBytes(bytes, owed?.envelopeHash)
+      const outcome = await ingestBytes(bytes, owed?.envelopeHash, owed?.owedAuthor)
       if (outcome.status !== 'valid') {
         seeder.setDownloadState(id, 'failed', `admission refused it: ${String(outcome.reason ?? outcome.status)}`)
         if (owed) {
@@ -3006,6 +3031,7 @@ app.whenReady().then(async () => {
           notifyFeedChanged()
         }
         pushTransfers()
+        if (owed?.owedAuthor) void drainSubscriptions()
         return
       }
       // It arrived and it admitted: the intent is discharged, and the partial
@@ -3014,6 +3040,8 @@ app.whenReady().then(async () => {
       seeder.finishDownload(id)
       notifyFeedChanged()
       pushTransfers()
+      // A slot is free: anything a subscription was holding back can go.
+      if (owed?.owedAuthor) void drainSubscriptions()
     } catch (e) {
       seeder.setDownloadState(id, 'failed', (e as Error).message)
       pushTransfers()
@@ -3247,9 +3275,14 @@ app.whenReady().then(async () => {
         type: ev.type,
         inGroup: ev.group,
         replyTo: ev.replyTo,
+        feed: feedTagOf(ev),
         now: Date.now()
       })
       if (noted) notifyFeedChanged()
+      // The one exception to "nothing is fetched until a press": the human
+      // subscribed to the author whose relay key posted this. Anyone else's
+      // pointer stays an offer.
+      if (noted && library.subscriptionForPoster(ev.event.pubkey)) void drainSubscriptions()
       return
     }
     const held = library.get(ev.envelopeHash) !== null
@@ -3424,18 +3457,137 @@ app.whenReady().then(async () => {
     return /^(https?:|bundle:)/i.test(l) && transport.supports(l)
   }
 
+  /** The `thing-feed` tag: which of a publisher's feeds a pointer belongs to.
+   *  Provisional, like every thing-* tag; a hint the poster chose. */
+  function feedTagOf(ev: ParsedThingEvent): string | null {
+    for (const t of ev.event.tags) if (t[0] === 'thing-feed' && typeof t[1] === 'string' && t[1].length <= 64) return t[1]
+    return null
+  }
+
+  // ── Subscriptions ───────────────────────────────────────────────────────────
+  // Consent to fetch one author's pointers without a press each time. The
+  // bounds are what keep it consent rather than a door: only the relay key the
+  // author bound to their own public letters can trigger it, only for the
+  // feeds chosen, only so many an hour and so many at once, never past a size
+  // cap, never a locator a pointer could not be followed to anyway -- and what
+  // arrives must be signed by that author. A failed fetch is not retried on its
+  // own: that would be the retry loop the Fetch button exists to prevent.
+  const subscriptionDefaults = {
+    maxBytes: numEnv('SHELL_SUBSCRIPTION_MAX_BYTES', 64 * 1024 * 1024),
+    perHour: numEnv('SHELL_SUBSCRIPTION_PER_HOUR', 120)
+  }
+  const AUTO_CONCURRENT = numEnv('SHELL_SUBSCRIPTION_CONCURRENT', 3)
+  /** A transfer still "fetching" after this long no longer holds a slot, so a
+   *  dead swarm cannot stall a subscription forever. It keeps running. */
+  const AUTO_STALL_MS = numEnv('SHELL_SUBSCRIPTION_STALL_MS', 30 * 60_000)
+  /** On subscribing, how many of the author's waiting offers to catch up on. */
+  const AUTO_CATCH_UP = 50
+  /** One drain at a time, so two triggers (a pointer arriving during a
+   *  catch-up) can never both start the same offer; a trigger that lands
+   *  mid-drain makes the running one go round again. */
+  let drainRunning = false
+  let drainAgain = false
+
+  /** Only ever called from drainSubscriptions. */
+  async function drainSubscription(sub: SubscriptionRow): Promise<void> {
+    for (const o of library.offeredBy(sub.ek, AUTO_CATCH_UP)) {
+      if (library.autoFetching(Date.now() - AUTO_STALL_MS) >= AUTO_CONCURRENT) return
+      if (library.autoFetchesSince(sub.authorScheme, sub.authorKey, Date.now() - 3_600_000) >= sub.perHour) {
+        record({ type: 'subscription-paused', author: sub.authorKey, reason: 'hourly limit' })
+        return
+      }
+      if (sub.feeds && (!o.feed || !sub.feeds.includes(o.feed))) continue
+      // Network locators only; followable() is still checked in fetchOffer.
+      if (!/^(magnet:|https?:)/i.test(o.locator.trim())) continue
+      library.noteAutoFetch(o.envelopeHash, sub.authorScheme, sub.authorKey, Date.now())
+      await fetchOffer(o.envelopeHash, { maxBytes: sub.maxBytes })
+    }
+  }
+
+  async function drainSubscriptions(): Promise<void> {
+    if (drainRunning) {
+      drainAgain = true
+      return
+    }
+    drainRunning = true
+    try {
+      do {
+        drainAgain = false
+        for (const sub of library.subscriptions()) await drainSubscription(sub)
+      } while (drainAgain)
+    } catch (e) {
+      record({ type: 'subscription-paused', author: '', reason: (e as Error).message })
+    } finally {
+      drainRunning = false
+    }
+  }
+
+  async function subscribeTo(scheme: unknown, key: unknown, feedsRaw: unknown): Promise<Record<string, unknown>> {
+    const k = typeof key === 'string' ? key.toLowerCase().replace(/^0x/, '') : ''
+    if (!HEXKEY.test(k)) return { error: 'bad key' }
+    const s = typeof scheme === 'string' && scheme ? scheme : keyring.signer.scheme
+    if (s === keyring.signer.scheme && k === myKeyHex()) return { error: 'that is your own key' }
+    // The relay key comes from the author's OWN public letter, never from a
+    // pointer: a stranger's event cannot make itself the key we trust.
+    const enc = library.encKeyFor(s, k)
+    if (!enc || enc.scheme !== NOSTR_ENC_SCHEME || !HEX64.test(enc.key)) {
+      return { error: 'none of their letters you hold names a relay key, so there is nothing to subscribe to' }
+    }
+    let feeds: string[] | null = null
+    if (feedsRaw !== null && feedsRaw !== undefined) {
+      if (!Array.isArray(feedsRaw) || feedsRaw.length > 64 || feedsRaw.some((f) => typeof f !== 'string' || !f || f.length > 64)) {
+        return { error: 'bad feeds' }
+      }
+      feeds = [...new Set(feedsRaw as string[])]
+      if (feeds.length === 0) return { error: 'choose at least one feed, or all' }
+    }
+    library.subscribe({ authorScheme: s, authorKey: k, ek: enc.key, feeds, ...subscriptionDefaults }, Date.now())
+    const sub = library.subscription(s, k)!
+    record({ type: 'subscribed', author: k, feeds: feeds ?? 'all' })
+    void drainSubscriptions() // catch up on what is already on offer
+    return { ok: true, ...sub }
+  }
+
+  function unsubscribeFrom(scheme: unknown, key: unknown): Record<string, unknown> {
+    const k = typeof key === 'string' ? key.toLowerCase().replace(/^0x/, '') : ''
+    if (!HEXKEY.test(k)) return { error: 'bad key' }
+    const s = typeof scheme === 'string' && scheme ? scheme : keyring.signer.scheme
+    const removed = library.unsubscribe(s, k)
+    if (removed) record({ type: 'unsubscribed', author: k })
+    return { ok: removed }
+  }
+
+  /** Subscriptions, each with the feeds its author has offered so far. */
+  function subscriptionList(): Record<string, unknown>[] {
+    return library.subscriptions().map((sub) => ({ ...sub, feedsOffered: library.feedsOfferedBy(sub.ek) }))
+  }
+
+  /** What a Subscribe dialog can offer for an author: the feeds their relay
+   *  key has posted pointers for, and whether there is a key at all. */
+  function subscriptionOptions(scheme: unknown, key: unknown): Record<string, unknown> {
+    const k = typeof key === 'string' ? key.toLowerCase().replace(/^0x/, '') : ''
+    if (!HEXKEY.test(k)) return { error: 'bad key' }
+    const s = typeof scheme === 'string' && scheme ? scheme : keyring.signer.scheme
+    const enc = library.encKeyFor(s, k)
+    const ek = enc && enc.scheme === NOSTR_ENC_SCHEME ? enc.key : null
+    return { ek, feedsOffered: ek ? library.feedsOfferedBy(ek) : [], subscription: library.subscription(s, k) }
+  }
+
   /** Everything a relay has offered that this library does not hold. */
   function offerList(inGroup?: unknown): Record<string, unknown>[] {
     const q = typeof inGroup === 'string' && HEX64.test(inGroup) ? { inGroup } : {}
     return library.offers(q).map((o) => ({ ...o }))
   }
 
-  /** Fetch an offered thing. THE PRESS: nothing calls this on its own.
+  /** Fetch an offered thing. THE PRESS: nothing calls this on its own, except
+   *  a subscription the human made (drainSubscription), which marks the offer
+   *  with the author it owes first.
    *
    *  Whatever comes back must admit to the hash that was advertised. A magnet
    *  becomes a background transfer that verifies when it lands; everything
-   *  else is fetched and checked here. */
-  async function fetchOffer(envelopeHash: unknown): Promise<Record<string, unknown>> {
+   *  else is fetched and checked here. `limits` is internal: the IPC handler
+   *  passes only the hash. */
+  async function fetchOffer(envelopeHash: unknown, limits: { maxBytes?: number } = {}): Promise<Record<string, unknown>> {
     if (typeof envelopeHash !== 'string' || !HEX64.test(envelopeHash)) return { error: 'bad hash' }
     if (library.get(envelopeHash)) {
       library.dropOffer(envelopeHash)
@@ -3452,7 +3604,7 @@ app.whenReady().then(async () => {
     }
 
     if (/^magnet:/i.test(offer.locator.trim())) {
-      const started = await startTransfer(offer.locator.trim())
+      const started = await startTransfer(offer.locator.trim(), limits.maxBytes)
       if (started.status !== 'started') {
         library.setOfferState(envelopeHash, 'failed', String(started.reason ?? 'could not start'))
         notifyFeedChanged()
@@ -3469,13 +3621,13 @@ app.whenReady().then(async () => {
     notifyFeedChanged()
     let bytes: Uint8Array
     try {
-      bytes = await transport.fetch(offer.locator.trim())
+      bytes = await transport.fetch(offer.locator.trim(), limits.maxBytes !== undefined ? { maxBytes: Math.min(limits.maxBytes, fetchLimits.maxBytes) } : undefined)
     } catch (e) {
       library.setOfferState(envelopeHash, 'failed', `transport: ${(e as Error).message}`)
       notifyFeedChanged()
       return { status: 'invalid', reason: `transport: ${(e as Error).message}` }
     }
-    const outcome = await ingestBytes(bytes, envelopeHash)
+    const outcome = await ingestBytes(bytes, envelopeHash, offer.owedAuthor)
     if (outcome.status !== 'valid') {
       library.setOfferState(envelopeHash, 'failed', String(outcome.reason ?? outcome.status))
       notifyFeedChanged()
@@ -3556,6 +3708,8 @@ app.whenReady().then(async () => {
   // where it left off.
   for (const url of library.relays()) nostr.connect(url)
   if (library.relays().length > 0) nostr.subscribe(subAll())
+  // Offers a subscription was holding back when the app last closed.
+  void drainSubscriptions()
 
   /** Delete a thing everywhere the shell holds it: close it if open, drop the
    *  library row (+ GC of now-unreferenced content blobs), and stop seeding
@@ -4007,6 +4161,10 @@ app.whenReady().then(async () => {
   )
   ipcMain.handle('shell:offers', (_e, g: unknown) => offerList(g))
   ipcMain.handle('shell:fetch-offer', async (_e, h: unknown) => await fetchOffer(h))
+  ipcMain.handle('shell:subscribe', async (_e, s: unknown, k: unknown, f: unknown) => await subscribeTo(s, k, f))
+  ipcMain.handle('shell:unsubscribe', (_e, s: unknown, k: unknown) => unsubscribeFrom(s, k))
+  ipcMain.handle('shell:subscriptions', () => subscriptionList())
+  ipcMain.handle('shell:subscription-options', (_e, s: unknown, k: unknown) => subscriptionOptions(s, k))
   ipcMain.handle('shell:relays', () => relayState())
   ipcMain.handle('shell:community', () => communityState())
   ipcMain.handle('shell:community-join', () => joinCommunity())
@@ -4053,6 +4211,9 @@ app.whenReady().then(async () => {
   shell.newVerdict = (h, g, v) => newVerdict(h, g, v)
   shell.offers = (g) => offerList(g)
   shell.fetchOffer = (h) => fetchOffer(h)
+  shell.subscribe = (s, k, f) => subscribeTo(s, k, f)
+  shell.unsubscribe = (s, k) => unsubscribeFrom(s, k)
+  shell.subscriptions = () => subscriptionList()
   shell.relays = () => relayState()
   shell.addRelay = (url) => addRelay(url)
   shell.removeRelay = (url) => removeRelay(url)
