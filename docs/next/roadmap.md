@@ -22,6 +22,11 @@ Nothing here is a promise or has a date.
 
 ## Further: what this design makes possible
 
+> **Partly here.** Passport readings and proofs, forums that admit by proof, and
+> witnessed secret ballots among passport holders now exist:
+> [Passports](../use/passport.md). What follows is still ahead where it concerns
+> *rosters* — proving you are one of a listed set of keys.
+
 ### Prove you belong, without saying who you are
 
 A group's roster is already a signed, versioned list of keys. Commit to it as a

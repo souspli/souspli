@@ -5,7 +5,7 @@ letter names its type by hash, so given a letter you know exactly which program 
 meant to show it, and no other program can claim it. Souspli labels a letter from
 that hash — never from what the letter says about itself.
 
-Sixteen types are built in. Press **New** to start any of them. The list also
+Twenty-one types are built in. Press **New** to start any of them. The list also
 offers every type already in your library, so receiving a letter of a new type gives
 you the ability to write one.
 
@@ -44,6 +44,10 @@ you the ability to write one.
 | **Group** | A roster of keys with roles and names, amended by publishing a new version. A group is also a [forum](forums.md). |
 | **Request to join** | Asks a group's keeper to put you on the roster. |
 | **Vouch** | A public statement that you recognise a key, and what you call its owner. Builds your [tribe](people.md). |
+| **Passport** | A reading of a passport's chip: the holder's full identity data, with the issuing state's signature. Souspli checks it and says in the header whether it is genuine and whether the chip signed the author's key. [Read this first](passport.md). |
+| **Passport proof** | Zero-knowledge proofs of facts from a passport — "over 18", "a citizen of Canada" — bound to your key, without the name, the number or the passport. Souspli checks the proofs and states in the header what held. [How](passport.md#proofs). |
+| **Secret ballot** | A question, its options, who may vote (a passport rule) and the witnesses who close it. Votes are separate letters under one-time keys: one passport, one vote, no names. [How](passport.md#ballots). |
+| **Ballot vote**, **Ballot closing** | The letters a ballot is made of. Cast and closed from the ballot's header, not written by hand. |
 
 ## Your own
 

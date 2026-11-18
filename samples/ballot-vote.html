@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>ballot vote</title>
+<style>
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: #1d2320; color: #222;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh;
+         padding: 24px; box-sizing: border-box; }
+  .page { background: #f7f5ee; width: 32em; max-width: 100%; border-radius: 8px; padding: 24px 28px;
+          box-sizing: border-box; box-shadow: 0 12px 32px rgba(0, 0, 0, .5); }
+  h1 { margin: 0 0 12px; font-size: 13px; letter-spacing: .22em; text-transform: uppercase; color: #1f4e79; }
+  .big { font-size: 20px; font-weight: 700; }
+  .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #6b6b6b; margin-top: 12px; }
+  .v { font-size: 13px; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
+  .note { margin-top: 16px; padding-top: 12px; border-top: 1px solid #d8d4c6; font-size: 13px; color: #555; }
+</style>
+</head>
+<body>
+  <div class="page"><div id="app"></div></div>
+  <script>
+    'use strict';
+    // One vote in a secret ballot.
+    //
+    // State: args { votesOn: <the ballot's hash>, choice: <index into its options>,
+    //               format, address, scope, subscope, claims, proofs } -- the choice, and a
+    // passport proof package (see passport-proof) bound to the ONE-TIME key that signed this
+    // letter and scoped to the ballot. Nothing here names the voter.
+    //
+    // A vote is cast from the ballot's header, not written by hand: Souspli signs it with a
+    // key made for that ballot alone. This program only shows what the letter says. Whether
+    // the proofs hold, and whether the vote counts, is Souspli's to say, in the header and
+    // on the ballot.
+    var a = window.bridge.getArgs() || {};
+    var args = (a && typeof a.args === 'object' && a.args !== null) ? a.args : {};
+    var app = document.getElementById('app');
+    function el(tag, text, cls) { var e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
+    function str(v) { return typeof v === 'string' ? v : ''; }
+    var n = typeof args.choice === 'number' && args.choice >= 0 && Math.floor(args.choice) === args.choice ? args.choice : null;
+    var choice = el('div', n === null ? 'No choice recorded' : 'Option ' + (n + 1), 'big'); choice.id = 'vote-choice';
+    var target = el('div', str(args.votesOn) || '—', 'v'); target.id = 'vote-ballot';
+    var note = el('div', undefined, 'note'); note.id = 'view-note';
+    note.textContent = a.mode === 'edit'
+      ? 'A vote is not written here. Open the ballot and use Vote in its header: Souspli signs the vote with a key made for that ballot alone.'
+      : 'This is what the letter says. Whether its proofs hold and whether it is counted are stated by Souspli, in the header above and on the ballot. It is signed by a one-time key and names nobody.';
+    app.append(el('h1', 'Secret ballot — a vote'), choice, el('div', 'On the ballot', 'k'), target, note);
+    // Whole-set replacement applies to a draft of this type too: keep what is held.
+    if (a.mode === 'edit') window.bridge.emit('draft', { type: 'ballot-vote', args: args });
+  </script>
+</body>
+</html>

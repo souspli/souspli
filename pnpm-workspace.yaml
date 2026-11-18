@@ -28,6 +28,10 @@ allowBuilds:
   ip-set: false
   utf-8-validate: false
   utp-native: false
+  # bb.js (the zero-knowledge proof verifier) depends on msgpackr, whose native
+  # extractor is an optional speedup. Declined: the verifier runs as WebAssembly
+  # and msgpackr falls back to its own JavaScript.
+  msgpackr-extract: false
 onlyBuiltDependencies:
   - electron
   - esbuild

@@ -34,7 +34,7 @@ directories:
 
 # What goes in the app. The vite build bundles @noble/* and zod INTO out/main.
 # Runtime node_modules are the production dependencies it keeps external:
-# better-sqlite3 (native), webtorrent, and electron-updater.
+# better-sqlite3 (native), webtorrent, electron-updater, and bb.js.
 files:
   - out/**/*
   - package.json
@@ -49,6 +49,12 @@ files:
   - '!**/node_modules/**/{Makefile,.gitmodules,.editorconfig,.eslintignore,.prettierrc,.prettierignore}'
   - '!**/node_modules/better-sqlite3/build/Release/test_extension.node'
   - '!**/node_modules/**/prebuilds/{android,ios}-*/**'
+  # bb.js (the zero-knowledge proof verifier) is used as WebAssembly only. Its
+  # package also carries native `bb` binaries for four platforms (about 150 MB),
+  # a browser build and its sources: none of them ship.
+  - '!**/node_modules/@aztec-foundation/bb.js/build/**'
+  - '!**/node_modules/@aztec-foundation/bb.js/dest/browser/**'
+  - '!**/node_modules/@aztec-foundation/bb.js/src/**'
 
 # Double-clicking a .thing opens it in the shell (it still goes through the
 # same admission gate — arriving by double-click grants a bundle nothing).

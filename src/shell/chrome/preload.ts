@@ -163,6 +163,11 @@ const shell = {
     ipcRenderer.invoke('shell:forum-post', rootHash, starterKey),
   requestJoin: (rootHash: string): Promise<{ id?: string; error?: string }> =>
     ipcRenderer.invoke('shell:request-join', rootHash),
+  newGatedGroup: (rule: string): Promise<{ id?: string; error?: string }> => ipcRenderer.invoke('shell:new-gated-group', rule),
+  ballot: (hash: string): Promise<Record<string, unknown>> => ipcRenderer.invoke('shell:ballot', hash),
+  ballotCast: (hash: string, choice: number, packageText: string): Promise<{ envelopeHash?: string; error?: string }> =>
+    ipcRenderer.invoke('shell:ballot-cast', hash, choice, packageText),
+  ballotClose: (hash: string): Promise<{ envelopeHash?: string; listed?: number; error?: string }> => ipcRenderer.invoke('shell:ballot-close', hash),
   newVerdict: (targetHash: string, rootHash: string, verdict: string): Promise<{ id?: string; error?: string }> =>
     ipcRenderer.invoke('shell:new-verdict', targetHash, rootHash, verdict),
   onOpenForums: (cb: () => void): void => {

@@ -24,3 +24,4 @@ today, read [How it works](../how/index.md).
 | 2026-08-23 | [sandbox](sandbox.md) | The OS sandbox: why the suite runs with it off, and how that is kept honest. |
 | 2026-09-13 | [relay](relay.md) | Nostr relays: the first push transport; offers and pointers. |
 | 2026-09-13 | [forum](forum.md) | A forum out of existing primitives plus one new type, the vote. |
+| 2026-11-18 | [credentials](credentials.md) | Passport readings and proofs, forums that admit by proof, and witnessed secret ballots. |

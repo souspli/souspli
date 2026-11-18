@@ -4,6 +4,9 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs
 import { spawn } from 'node:child_process'
 import { writeFile } from 'node:fs/promises'
 import { AdmissionService } from './admission/index.js'
+import { CREDENTIAL_TYPES, CredentialService, anchorsFromEnv, rootsFromEnv } from './credential/index.js'
+import { admitted, describeRule, formatRule, groupScope, parseRule, passportRuleOf, type Candidate, type PassportRule } from './credential/gate.js'
+import { ballotScope, encodeClosing, parseBallot, parseClosing, tally, validVotes, type Ballot, type CastVote, type Closing } from './credential/ballot.js'
 import { Keyring, KeyringLoadError } from './keyring/index.js'
 import { nodeContext, parseArgs, profileName, profilesDir, readPublicIdentity, runCommand } from './cli.js'
 import { InstanceRegistry } from './instances.js'
@@ -476,6 +479,10 @@ interface ShellSurface {
   forumListing?: (rootHash: string) => Record<string, unknown>
   newForumPost?: (rootHash: string, starterKey?: string) => Record<string, unknown>
   requestJoin?: (rootHash: string) => Record<string, unknown>
+  newGatedGroup?: (rule: string) => Record<string, unknown>
+  ballot?: (hash: string) => Record<string, unknown>
+  ballotCast?: (hash: string, choice: number, packageText: string) => Promise<Record<string, unknown>>
+  ballotClose?: (hash: string) => Promise<Record<string, unknown>>
   newVerdict?: (targetHash: string, rootHash: string, verdict: string) => Record<string, unknown>
   /** Things a relay says exist that this library does not hold. */
   offers?: (inGroup?: string) => Record<string, unknown>[]
@@ -657,6 +664,12 @@ app.whenReady().then(async () => {
     .register(new DirectResolver())
     .register(new EnsResolver(ensClient))
     .register(new NostrResolver())
+  // Passport readings and proofs: checked in an isolated worker, shown in the header.
+  const credentials = new CredentialService(anchorsFromEnv(), rootsFromEnv())
+  credentials.store = {
+    get: (h) => library.credentialVerdict(h),
+    put: (h, v) => library.setCredentialVerdict(h, v, Date.now())
+  }
   dbg('window')
 
   // ── Window + chrome ────────────────────────────────────────────────────────
@@ -1009,7 +1022,16 @@ app.whenReady().then(async () => {
   }
   watchZoomKeys(chrome.webContents)
 
+  /** Who each proof-admitting forum admits, worked out once per change to the library (see gateOf). */
+  interface Gate {
+    rule: PassportRule
+    members: Map<string, Candidate>
+  }
+  const gateMemo = new Map<string, Gate | null>()
+
   function notifyFeedChanged(): void {
+    // Who a gated forum admits depends on the letters held, so it is worked out afresh.
+    gateMemo.clear()
     chrome.webContents.send('shell:feed-changed')
   }
 
@@ -1068,6 +1090,10 @@ app.whenReady().then(async () => {
       // fetched, a file dropped in, a bundle pasted -- all the same once the
       // thing is here.
       library.dropOffer(hex(result.envelopeHash))
+      // A credential letter's proofs are checked as it arrives, off to the
+      // side, so that a forum which admits by proof already knows the verdict
+      // when it is next drawn. Nothing waits on it.
+      if (CREDENTIAL_TYPES.has(result.manifest.type) && !result.sealed) checkCredentialOf(hex(result.envelopeHash))
       notifyFeedChanged()
       return { ...summarize(result), duplicate: !stored.inserted }
     }
@@ -1255,6 +1281,8 @@ app.whenReady().then(async () => {
         attestCount: draft ? 0 : library.countRefsTo(envelopeHash, 'attests'),
         ...trustFacts(current.stored, draft !== null),
         ...privateFacts(draft?.id ?? null),
+        // A ballot's count is library state too: votes and closings arrive.
+        ballot: !draft && current.stored.manifest.type === 'ballot' ? ballotFacts(envelopeHash) : null,
         ...(draft ? {} : documentFacts(current.stored.row.manifestHash)),
         ...(draft ? {} : versionFacts(current.stored.row)),
         mine: draft ? true : hex(keyring.identity.address).toLowerCase() === current.stored.row.authorKey
@@ -1345,6 +1373,18 @@ app.whenReady().then(async () => {
     // A draft is unsigned and authored by nobody yet: no name lookup, and the
     // header must say DRAFT rather than "signed".
     const nv = draft ? null : await naming.primaryName(m.header.authorScheme, m.header.authorKey)
+    // What the letter's evidence is worth, for the types that carry any (a
+    // passport reading). Checked by the shell against the AUTHOR KEY, never by
+    // the letter's program -- which is why it is a header fact. Not for a
+    // draft: there is no author yet for a chip signature to be about.
+    const credential = draft
+      ? null
+      : await credentials.check(envelopeHash, {
+          type: stored.manifest.type,
+          args: cborToJs(stored.manifest.args),
+          authorScheme: m.header.authorScheme as string,
+          authorKey: m.header.authorKey as string
+        })
     // What this thing CLAIMS to reply to, and whether we hold that target.
     // The claim is unauthenticated (anyone may claim to reply to anything);
     // the chrome says so and never dresses it as verification.
@@ -1364,6 +1404,10 @@ app.whenReady().then(async () => {
       // Your own label for this author, kept SEPARATE from the verified name:
       // one is proof, the other is what you decided to call them.
       petname: library.petname(m.header.authorScheme as string, m.header.authorKey as string)?.name ?? null,
+      credential,
+      // A ballot's count, and what you may do about it: worked out here from
+      // the votes and closings held, never by the ballot's own page.
+      ballot: !draft && stored.manifest.type === 'ballot' ? ballotFacts(envelopeHash) : null,
       draft: draft !== null,
       replyTo: claimed,
       replyToKnown: claimed ? library.get(claimed) !== null : false,
@@ -1929,6 +1973,211 @@ app.whenReady().then(async () => {
     return stored ? refTarget(stored.manifest.args, 'inGroup') : null
   }
 
+  // ── Forums that admit by passport proof (credential/gate.ts) ───────────────
+  //
+  // A group whose args state `requires.passport` is not a list its keeper
+  // wrote: its members are the authors of verified passport-proof letters
+  // posted into it that satisfy the rule, one per passport. Every reader works
+  // that out from the letters they hold, here, and everything a forum counts
+  // -- posts, comments, votes -- then counts members only.
+  //
+  // Verdicts come from the credential service, which checks in an isolated
+  // worker and remembers. This code never waits for one: an unchecked proof is
+  // sent to be checked and simply is not a member yet; when its verdict lands
+  // the feed is redrawn.
+  const keyId = (scheme: string, key: string): string => `${scheme}:${key.toLowerCase()}`
+
+  function checkCredentialOf(envelopeHash: string): void {
+    const stored = library.load(envelopeHash)
+    if (!stored) return
+    void credentials
+      .check(envelopeHash, {
+        type: stored.manifest.type,
+        args: cborToJs(stored.manifest.args),
+        authorScheme: stored.row.authorScheme,
+        authorKey: stored.row.authorKey
+      })
+      .then(() => notifyFeedChanged())
+      .catch(() => {})
+  }
+
+  /** The gate on the forum rooted at `rootHash`, or null when it admits anyone. */
+  function gateOf(rootHash: string): Gate | null {
+    const memo = gateMemo.get(rootHash)
+    if (memo !== undefined) return memo
+    const current = library.groupCurrent(rootHash)
+    const stored = current ? library.load(current.envelopeHash) : null
+    const rule = stored ? passportRuleOf(cborToJs(stored.manifest.args)) : null
+    let gate: Gate | null = null
+    if (rule) {
+      const candidates: Candidate[] = []
+      for (const r of library.feed({ type: 'passport-proof', inGroup: rootHash, limit: 1000 })) {
+        const verdict = credentials.known(r.envelopeHash)
+        if (!verdict) checkCredentialOf(r.envelopeHash)
+        else if (verdict.kind === 'passport-proof' && verdict.status === 'verified') {
+          candidates.push({ envelopeHash: r.envelopeHash, authorScheme: r.authorScheme, authorKey: r.authorKey, created: r.created, facts: verdict.proof })
+        }
+      }
+      gate = { rule, members: admitted(rule, rootHash, candidates) }
+    }
+    gateMemo.set(rootHash, gate)
+    return gate
+  }
+
+  /** Whether a key counts in the forum: always, unless the forum admits by proof. */
+  function countsIn(gate: Gate | null, scheme: string, key: string): boolean {
+    return !gate || gate.members.has(keyId(scheme, key))
+  }
+
+  // ── Secret ballots (credential/ballot.ts) ──────────────────────────────────
+  //
+  // A ballot is counted here, by each reader, from the vote letters and the
+  // witnesses' closing statements that reader holds. Votes are signed by
+  // one-time keys and carry passport proofs; like a gated forum, nothing waits
+  // for a verdict -- an unchecked vote is sent to be checked and is not yet
+  // counted, and the header says how many are in that state.
+
+  function ballotOf(hash: string): Ballot | null {
+    const row = library.get(hash)
+    if (!row || row.type !== 'ballot' || row.sealed) return null
+    const stored = library.load(hash)
+    return stored ? parseBallot(cborToJs(stored.manifest.args)) : null
+  }
+
+  function ballotLetters(hash: string): { votes: CastVote[]; closings: Closing[]; unchecked: number } {
+    const votes: CastVote[] = []
+    let unchecked = 0
+    for (const r of library.feed({ type: 'ballot-vote', votesOn: hash, limit: 8000 })) {
+      const verdict = credentials.known(r.envelopeHash)
+      if (!verdict) {
+        unchecked++
+        checkCredentialOf(r.envelopeHash)
+        continue
+      }
+      if (verdict.kind !== 'passport-proof' || verdict.status !== 'verified') continue
+      const stored = library.load(r.envelopeHash)
+      const choice = stored ? (cborToJs(stored.manifest.args) as { choice?: unknown }).choice : undefined
+      votes.push({ envelopeHash: r.envelopeHash, created: r.created, choice: typeof choice === 'number' ? choice : -1, facts: verdict.proof })
+    }
+    const closings: Closing[] = []
+    for (const r of library.feed({ type: 'ballot-close', attests: hash, limit: 500 })) {
+      const stored = library.load(r.envelopeHash)
+      const listed = stored ? parseClosing(cborToJs(stored.manifest.args)) : null
+      if (listed) closings.push({ envelopeHash: r.envelopeHash, author: keyId(r.authorScheme, r.authorKey), created: r.created, votes: listed })
+    }
+    return { votes, closings, unchecked }
+  }
+
+  /** Your one-time address on a ballot: what your vote's proofs must be bound to. */
+  function ballotAddress(hash: string): string {
+    return `0x${hex(keyring.ballotSigner(hash).pubkey)}`
+  }
+
+  /** Everything the header says about a ballot. */
+  function ballotFacts(hash: unknown): Record<string, unknown> {
+    if (typeof hash !== 'string' || !HEX64.test(hash)) return { error: 'bad hash' }
+    const ballot = ballotOf(hash)
+    if (!ballot) return { error: 'not a ballot Souspli can read' }
+    const { votes, closings, unchecked } = ballotLetters(hash)
+    const t = tally(ballot, hash, votes, closings)
+    const me = keyId(keyring.signer.scheme, myKeyHex())
+    const mine = ballotAddress(hash)
+    // Your own vote is the one signed by your one-time key for this ballot.
+    const myVotes = library
+      .feed({ type: 'ballot-vote', votesOn: hash, limit: 8000 })
+      .filter((r) => `0x${r.authorKey.toLowerCase()}` === mine)
+      .sort((a, b) => b.created - a.created)
+    const myVote = myVotes[0]
+    return {
+      question: ballot.question,
+      options: ballot.options,
+      rule: describeRule(ballot.rule),
+      witnesses: ballot.witnesses.map((w) => ({ key: w.id.split(':')[1] ?? '', name: w.name, closed: closings.some((c) => c.author === w.id) })),
+      closes: ballot.closes,
+      pastClose: ballot.closes !== null && Date.now() >= ballot.closes,
+      ...t,
+      unchecked,
+      iAmWitness: ballot.witnesses.some((w) => w.id === me),
+      iHaveClosed: closings.some((c) => c.author === me),
+      voteAddress: mine,
+      voteScope: ballotScope(hash),
+      myVote: myVote ? { envelopeHash: myVote.envelopeHash, counted: t.countedVotes.includes(myVote.envelopeHash) } : null
+    }
+  }
+
+  /**
+   * Cast your vote: a letter signed by your one-time key for this ballot,
+   * carrying a proof package made for that key and this ballot. The envelope
+   * names no Nostr key and nothing else of yours. The proofs are checked
+   * BEFORE the letter is kept: a vote that would not count is not created.
+   */
+  async function castBallot(hash: unknown, choice: unknown, packageText: unknown): Promise<Record<string, unknown>> {
+    if (typeof hash !== 'string' || !HEX64.test(hash)) return { error: 'bad hash' }
+    const ballot = ballotOf(hash)
+    if (!ballot) return { error: 'not a ballot Souspli can read' }
+    if (typeof choice !== 'number' || !Number.isInteger(choice) || choice < 0 || choice >= ballot.options.length) return { error: 'choose one of the options' }
+    if (typeof packageText !== 'string' || packageText.length > 240 * 1024) return { error: 'that is not a proof package' }
+    let pkg: Record<string, unknown>
+    try {
+      pkg = JSON.parse(packageText) as Record<string, unknown>
+    } catch {
+      return { error: 'that is not a proof package' }
+    }
+    if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return { error: 'that is not a proof package' }
+    const address = ballotAddress(hash)
+    if (pkg.address !== address) return { error: `that package is bound to ${String(pkg.address).slice(0, 44)}; your key for this ballot is ${address}` }
+    if (pkg.scope !== ballotScope(hash)) return { error: `that package was made for another scope; this ballot’s is ${ballotScope(hash)}` }
+    const starter = starterByKey('starter:ballot-vote')
+    if (!starter) return { error: 'the ballot-vote program is missing' }
+    const args = { votesOn: hash, choice, format: pkg.format, address: pkg.address, scope: pkg.scope, subscope: pkg.subscope ?? '', claims: pkg.claims ?? {}, proofs: pkg.proofs }
+    // Later than any vote this key already cast here: the latest is the one that counts.
+    const earlier = library.feed({ type: 'ballot-vote', votesOn: hash, limit: 8000 }).filter((r) => `0x${r.authorKey.toLowerCase()}` === address)
+    const created = Math.max(Math.floor(Date.now() / 1000), ...earlier.map((r) => r.created + 1))
+    let tar: Uint8Array
+    try {
+      // No `enc`: nothing in this envelope may point back at the voter.
+      tar = await buildBundle(keyring.ballotSigner(hash), { program: starterBytes(starter), type: 'ballot-vote', args: jsToCbor(args), attachments: new Map(), created })
+    } catch {
+      return { error: 'that is not a proof package' }
+    }
+    const admitted = await admission.admit(tar)
+    if (admitted.status !== 'valid') return { error: 'the vote could not be built' }
+    const verdict = await credentials.check(hex(admitted.envelopeHash), { type: 'ballot-vote', args, authorScheme: 'eth-eip191', authorKey: address.slice(2) })
+    if (!verdict || verdict.kind !== 'passport-proof' || verdict.status !== 'verified') {
+      return { error: `the proofs do not hold: ${verdict && 'reason' in verdict ? verdict.reason : 'unknown'}` }
+    }
+    if (validVotes(ballot, hash, [{ envelopeHash: '', created, choice, facts: verdict.proof }]).length === 0) {
+      return { error: `the proofs do not meet this ballot’s rule (${describeRule(ballot.rule)})` }
+    }
+    const outcome = await ingestBytes(tar)
+    if (outcome.status !== 'valid' || typeof outcome.envelopeHash !== 'string') return { error: String(outcome.reason ?? outcome.status) }
+    return { envelopeHash: outcome.envelopeHash }
+  }
+
+  /**
+   * As a named witness, close a ballot: publish the list of valid votes you
+   * hold now. Signed by your ordinary key -- a witness is a public role.
+   */
+  async function closeBallot(hash: unknown): Promise<Record<string, unknown>> {
+    if (typeof hash !== 'string' || !HEX64.test(hash)) return { error: 'bad hash' }
+    const ballot = ballotOf(hash)
+    if (!ballot) return { error: 'not a ballot Souspli can read' }
+    if (!ballot.witnesses.some((w) => w.id === keyId(keyring.signer.scheme, myKeyHex()))) return { error: 'this ballot does not name you a witness' }
+    if (ballot.closes !== null && Date.now() < ballot.closes) return { error: `this ballot asks its witnesses to close it at ${new Date(ballot.closes).toISOString()}, which is not yet` }
+    const { votes, unchecked } = ballotLetters(hash)
+    if (unchecked > 0) return { error: `${unchecked} vote(s) are still being checked; try again in a moment` }
+    const listed = validVotes(ballot, hash, votes).map((v) => v.envelopeHash)
+    const signed = await signStarter('starter:ballot-close', 'ballot-close', { attests: hash, votes: encodeClosing(listed) })
+    return signed.error ? signed : { ...signed, listed: listed.length }
+  }
+
+  /** Why you cannot act in a forum, or null when you can. */
+  function refusalIn(rootHash: string | null): string | null {
+    const gate = rootHash ? gateOf(rootHash) : null
+    if (!gate || gate.members.has(keyId(keyring.signer.scheme, myKeyHex()))) return null
+    return `this forum only counts members, and admits by ${describeRule(gate.rule)}. Publish yours into it first`
+  }
+
   /** Vote counts for a thing, split by whether the voter is someone you
    *  reached through your own vouches.
    *
@@ -1937,7 +2186,10 @@ app.whenReady().then(async () => {
    *  keys cost nothing. The tribe count is what it is worth TO YOU, and
    *  cannot be manufactured without first getting inside your vouches. */
   function voteFacts(targetHash: string, tribe = myTribe()): Record<string, unknown> {
-    const rows = library.votesOn(targetHash)
+    // In a forum that admits by proof, a vote from outside it is not a vote.
+    const forum = inGroupOf(targetHash)
+    const gate = forum ? gateOf(forum) : null
+    const rows = library.votesOn(targetHash).filter((v) => countsIn(gate, v.voterScheme, v.voterKey))
     let up = 0
     let down = 0
     let tribeUp = 0
@@ -1991,6 +2243,10 @@ app.whenReady().then(async () => {
     // A vote on a forum post belongs to that forum too, so the forum's relay
     // carries it and a per-forum subscription would see it.
     const inGroup = inGroupOf(targetHash)
+    // Not security -- nobody can stop a key signing a vote -- but a vote no
+    // reader will count should not be published as though it were one.
+    const refusal = refusalIn(inGroup)
+    if (refusal) return { error: refusal }
     // Strictly later than your previous vote on this, in whole seconds. Only
     // the latest vote counts, and `created` is all a READER has to tell which
     // is latest: here the tie is broken by arrival order, but a relay hands
@@ -2097,7 +2353,14 @@ app.whenReady().then(async () => {
         petname: library.petname(r.authorScheme, r.authorKey)?.name ?? null
       }))
     const mods = moderatorsOf(rootHash)
+    const gate = gateOf(rootHash)
     return {
+      // A forum that admits by proof: the rule in words, how many it admits,
+      // and what a proof for it must be made with. Null for an ordinary group.
+      requires: gate ? describeRule(gate.rule) : null,
+      provenMembers: gate ? gate.members.size : null,
+      proofScope: gate ? groupScope(rootHash) : null,
+      myAddress: `0x${myKeyHex()}`,
       root: rootHash,
       current: current.envelopeHash,
       keeper: current.authorKey,
@@ -2107,7 +2370,9 @@ app.whenReady().then(async () => {
       members: members.length,
       moderators: [...mods.entries()].map(([id, name]) => ({ key: id.split(':')[1] ?? '', name })),
       iAmModerator: mods.has(me),
-      iAmMember: roster.has(me),
+      // In a forum that admits by proof, the roster names roles (who
+      // moderates), and membership is the proof.
+      iAmMember: gate ? gate.members.has(me) : roster.has(me),
       pending
     }
   }
@@ -2125,6 +2390,8 @@ app.whenReady().then(async () => {
    *  and it belongs in the same bin as the ones that work. */
   function isForumMachinery(row: ThingRow): boolean {
     if (row.type === 'vote' || row.type === 'join-request') return true
+    // A proof posted into a forum is how its author gets in, not something to read.
+    if (row.type === 'passport-proof') return true
     if (row.type !== 'attestation') return false
     const stored = library.load(row.envelopeHash)
     if (!stored) return false
@@ -2144,9 +2411,11 @@ app.whenReady().then(async () => {
     if (typeof rootHash !== 'string' || !HEX64.test(rootHash)) return { error: 'bad hash' }
     const tribe = myTribe()
     const mods = moderatorsOf(rootHash)
+    const gate = gateOf(rootHash)
     const rows = library
       .forumPosts(rootHash)
       .filter((r) => !isForumMachinery(r))
+      .filter((r) => countsIn(gate, r.authorScheme, r.authorKey))
       // A reply belongs under the post it answers, not on the front page.
       // Replies carry `inGroup` so they stay with their forum when they
       // travel -- which is right, and is also why they have to be folded
@@ -2403,12 +2672,14 @@ app.whenReady().then(async () => {
     const order = sort === 'new' ? 'new' : 'top'
     const names = library.forumNames(root)
     const mods = moderatorsOf(root)
+    const gate = gateOf(root)
     const stories = library
       .feed({ inGroup: root, rollUp: true, limit: 500 })
       .filter((r) => r.type !== 'nametag' && !isForumMachinery(r))
+      .filter((r) => countsIn(gate, r.authorScheme, r.authorKey))
     const tallies = library.votesOnMany(stories.map((r) => r.envelopeHash))
     const rows = stories.map((r) => ({
-      ...forumRowOut(r, root, names, mods, tallies.get(r.envelopeHash) ?? []),
+      ...forumRowOut(r, root, names, mods, (tallies.get(r.envelopeHash) ?? []).filter((v) => countsIn(gate, v.voterScheme, v.voterKey))),
       comments: r.activity?.replies ?? 0
     }))
     return { ...forumState(), sort: order, now: Date.now(), rows: rank(rows, order, Date.now()).slice(0, 100) }
@@ -2423,11 +2694,17 @@ app.whenReady().then(async () => {
     if (!row) return { error: 'that post is not in your library' }
     const names = library.forumNames(root)
     const mods = moderatorsOf(root)
-    const nodes = library.thread(envelopeHash).filter((n) => n.row.type !== 'vote')
+    const gate = gateOf(root)
+    const counted = (h: string): { voterScheme: string; voterKey: string; dir: number }[] =>
+      (tallies.get(h) ?? []).filter((v) => countsIn(gate, v.voterScheme, v.voterKey))
+    const nodes = library
+      .thread(envelopeHash)
+      .filter((n) => n.row.type !== 'vote')
+      .filter((n) => countsIn(gate, n.row.authorScheme, n.row.authorKey))
     const tallies = library.votesOnMany([envelopeHash, ...nodes.map((n) => n.row.envelopeHash)])
-    const story = { ...forumRowOut(row, root, names, mods, tallies.get(envelopeHash) ?? []), comments: nodes.length }
+    const story = { ...forumRowOut(row, root, names, mods, counted(envelopeHash)), comments: nodes.length }
     const comments = nodes.map((n) => ({
-      ...forumRowOut(n.row, root, names, mods, tallies.get(n.row.envelopeHash) ?? []),
+      ...forumRowOut(n.row, root, names, mods, counted(n.row.envelopeHash)),
       parent: n.parent,
       depth: n.depth
     }))
@@ -2439,6 +2716,8 @@ app.whenReady().then(async () => {
   async function forumSubmit(input: unknown): Promise<Record<string, unknown>> {
     const root = joinedForum()
     if (!root) return { error: 'join the forum first' }
+    const refusal = refusalIn(root)
+    if (refusal) return { error: refusal }
     const i = (input && typeof input === 'object' ? input : {}) as Record<string, unknown>
     const str = (v: unknown): string => (typeof v === 'string' ? v : '')
     let signed: { envelopeHash?: string; error?: string }
@@ -2491,6 +2770,8 @@ app.whenReady().then(async () => {
   function newForumPost(rootHash: unknown, starterKey: unknown): Record<string, unknown> {
     if (typeof rootHash !== 'string' || !HEX64.test(rootHash)) return { error: 'bad hash' }
     if (!library.groupCurrent(rootHash)) return { error: 'no group by that hash in your library' }
+    const refusal = refusalIn(rootHash)
+    if (refusal) return { error: refusal }
     return newDraft(typeof starterKey === 'string' && starterKey ? starterKey : 'starter:article', {
       inGroup: rootHash
     })
@@ -2501,7 +2782,19 @@ app.whenReady().then(async () => {
   function requestJoin(rootHash: unknown): Record<string, unknown> {
     if (typeof rootHash !== 'string' || !HEX64.test(rootHash)) return { error: 'bad hash' }
     if (!library.groupCurrent(rootHash)) return { error: 'no group by that hash in your library' }
+    // A forum that admits by proof has nobody to ask: you get in by publishing
+    // a proof into it, so that is the letter this starts.
+    if (gateOf(rootHash)) return newDraft('starter:passport-proof', { inGroup: rootHash })
     return newDraft('starter:join-request', { inGroup: rootHash })
+  }
+
+  /** Start a group that admits by passport proof. The rule is seeded and
+   *  pinned, like the pointers the shell seeds elsewhere: the Group type knows
+   *  nothing of it, and its edit form cannot drop or alter it. */
+  function newGatedGroup(ruleText: unknown): Record<string, unknown> {
+    const rule = typeof ruleText === 'string' ? parseRule(ruleText) : { unreadable: true as const }
+    if (rule.unreadable) return { error: 'that is not a rule Souspli can read' }
+    return newDraft('starter:group', { requires: formatRule(rule) })
   }
 
   /** Start a moderator's verdict on a post: an attestation naming the forum.
@@ -4155,6 +4448,10 @@ app.whenReady().then(async () => {
   ipcMain.handle('shell:forum-submit', async (_e, input: unknown) => await forumSubmit(input))
   ipcMain.handle('shell:forum-open-link', async (_e, h: unknown) => await forumOpenLink(h))
   ipcMain.handle('shell:request-join', (_e, h: unknown) => requestJoin(h))
+  ipcMain.handle('shell:new-gated-group', (_e, rule: unknown) => newGatedGroup(rule))
+  ipcMain.handle('shell:ballot', (_e, h: unknown) => ballotFacts(h))
+  ipcMain.handle('shell:ballot-cast', async (_e, h: unknown, choice: unknown, pkg: unknown) => await castBallot(h, choice, pkg))
+  ipcMain.handle('shell:ballot-close', async (_e, h: unknown) => await closeBallot(h))
   ipcMain.handle('shell:new-verdict', (_e, h: unknown, g: unknown, v: unknown) => newVerdict(h, g, v))
   ipcMain.handle('shell:in-group', (_e, h: unknown) =>
     typeof h === 'string' && HEX64.test(h) ? inGroupOf(h) : null
@@ -4208,6 +4505,10 @@ app.whenReady().then(async () => {
   shell.forumSubmit = (input) => forumSubmit(input)
   shell.newForumPost = (h, key) => newForumPost(h, key)
   shell.requestJoin = (h) => requestJoin(h)
+  shell.newGatedGroup = (rule) => newGatedGroup(rule)
+  shell.ballot = (h) => ballotFacts(h)
+  shell.ballotCast = (h, choice, pkg) => castBallot(h, choice, pkg)
+  shell.ballotClose = (h) => closeBallot(h)
   shell.newVerdict = (h, g, v) => newVerdict(h, g, v)
   shell.offers = (g) => offerList(g)
   shell.fetchOffer = (h) => fetchOffer(h)

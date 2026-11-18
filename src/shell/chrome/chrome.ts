@@ -49,6 +49,10 @@ interface ShellApi extends ForumApi {
   forumListing(rootHash: string): Promise<{ rows: Record<string, unknown>[]; tribeEmpty: boolean }>
   newForumPost(rootHash: string, starterKey?: string): Promise<{ id?: string; error?: string }>
   requestJoin(rootHash: string): Promise<{ id?: string; error?: string }>
+  newGatedGroup(rule: string): Promise<{ id?: string; error?: string }>
+  ballot(hash: string): Promise<Record<string, unknown>>
+  ballotCast(hash: string, choice: number, packageText: string): Promise<{ envelopeHash?: string; error?: string }>
+  ballotClose(hash: string): Promise<{ envelopeHash?: string; listed?: number; error?: string }>
   newVerdict(targetHash: string, rootHash: string, verdict: string): Promise<{ id?: string; error?: string }>
   onOpenForums(cb: () => void): void
   relays(): Promise<{
@@ -219,6 +223,63 @@ interface Recipient {
   known: boolean
 }
 
+/** Mirrors ballotFacts in main.ts. */
+interface BallotFacts {
+  question: string
+  options: string[]
+  rule: string
+  witnesses: { key: string; name: string; closed: boolean }[]
+  closes: number | null
+  pastClose: boolean
+  closed: boolean
+  counts: number[]
+  counted: number
+  closings: number
+  quorum: number
+  unwitnessed: number
+  unchecked: number
+  iAmWitness: boolean
+  iHaveClosed: boolean
+  voteAddress: string
+  voteScope: string
+  myVote: { envelopeHash: string; counted: boolean } | null
+}
+
+/** Mirrors credential/check.ts CredentialVerdict (the renderer imports no shell code). */
+type CredentialFacts =
+  | {
+      kind: 'passport'
+      status: 'verified'
+      passport: {
+        documentType: string
+        issuingState: string
+        nationality: string
+        surname: string
+        givenNames: string
+        documentNumber: string
+        dateOfBirth: string
+        dateOfExpiry: string
+        sex: string
+        expired: boolean
+        anchor: string
+        chip: 'signed' | 'absent' | 'unsupported'
+      }
+    }
+  | {
+      kind: 'passport-proof'
+      status: 'verified'
+      proof: {
+        minAge?: number
+        nationalityIn?: string[]
+        scope: string
+        subscope: string
+        nullifier: string
+        provedAt: number
+        anchor: string
+      }
+    }
+  | { kind: 'passport' | 'passport-proof'; status: 'invalid' | 'unverifiable'; reason: string }
+
 interface HeaderFacts {
   type: string
   authorScheme: string
@@ -231,6 +292,13 @@ interface HeaderFacts {
   nameStatus?: 'verified' | 'mismatch' | 'unresolvable' | null
   /** YOUR name for the author. Never shown as verification — see authorLabel. */
   petname?: string | null
+  /** What the shell made of the evidence a credential letter carries (a
+   *  passport reading), checked against the author key. Null for every other
+   *  type. The letter's own program has no part in this. */
+  credential?: CredentialFacts | null
+  /** When this letter IS a ballot: its count and what you may do, as the shell
+   *  worked them out from the votes and witness closings you hold. */
+  ballot?: BallotFacts | { error: string } | null
   /** True when this is a local, unsigned draft — the header must NOT claim it
    *  is signed. The renderer never parses ids; this is the discriminant. */
   draft?: boolean
@@ -2928,6 +2996,45 @@ async function openForumsModal(): Promise<void> {
     }
   }
 
+  // A forum that admits by passport proof is an ordinary group with a rule the
+  // shell seeds and pins. The rule is stated here, in the header's own form,
+  // because the Group type neither knows of it nor can change it.
+  const gated = el('div')
+  gated.setAttribute('data-testid', 'forums-new-gated')
+  const age = el('input', 'evm-input') as HTMLInputElement
+  age.type = 'number'
+  age.min = '1'
+  age.max = '149'
+  age.placeholder = 'Minimum age, e.g. 18'
+  age.setAttribute('data-testid', 'forums-gated-age')
+  const nat = el('input', 'evm-input') as HTMLInputElement
+  nat.placeholder = 'Nationalities, e.g. CAN or CAN,USA'
+  nat.setAttribute('data-testid', 'forums-gated-nationality')
+  const start = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'New forum that admits by passport proof…')
+  start.setAttribute('data-testid', 'forums-gated-start')
+  start.addEventListener('click', async () => {
+    const terms = ['passport']
+    if (age.value.trim()) terms.push(`age>=${age.value.trim()}`)
+    const codes = nat.value.toUpperCase().split(/[\s,]+/).filter(Boolean)
+    if (codes.length) terms.push(`nationality=${codes.join(',')}`)
+    const r = await shell.newGatedGroup(terms.join(' '))
+    if (!r.id) return showText(`Could not start the forum: ${String(r.error ?? 'unknown')}`, 'danger')
+    overlay.remove()
+    await openThing(r.id)
+  })
+  gated.append(
+    el('div', 'evm-section-heading', 'Start a forum only some may join'),
+    el(
+      'div',
+      'sh-hint',
+      'Its members are whoever publishes a passport proof meeting the rule: one passport, one member, with no name attached. Leave both blank to admit any valid passport. The rule stays with the forum through every later version you publish.'
+    ),
+    age,
+    nat,
+    start
+  )
+  body.append(gated)
+
   const footer = el('div', 'evm-modal-footer')
   const close = el('button', 'evm-btn evm-btn--ghost', 'Close')
   close.setAttribute('data-testid', 'forums-close')
@@ -3022,6 +3129,31 @@ async function openForumModal(rootHash: string): Promise<void> {
       body.append(pend)
     }
 
+    if (facts.requires) {
+      const gate = el('div')
+      gate.setAttribute('data-testid', 'forum-gate')
+      gate.setAttribute('data-members', String(facts.provenMembers ?? 0))
+      gate.setAttribute('data-member', facts.iAmMember ? 'yes' : 'no')
+      gate.append(
+        el('div', 'evm-section-heading', 'Who is counted here'),
+        el(
+          'div',
+          'sh-hint',
+          `This forum admits by ${String(facts.requires)}. Posts, comments and votes count only from keys that have published one into it; one passport is one member. ` +
+            `${Number(facts.provenMembers ?? 0)} admitted so far${facts.iAmMember ? ', you among them.' : '. You are not one of them.'}`
+        )
+      )
+      if (!facts.iAmMember) {
+        const how = el('div', 'sh-hint')
+        how.setAttribute('data-testid', 'forum-gate-how')
+        how.textContent = `A proof for this forum must be made for your address ${String(facts.myAddress)} with the scope ${String(facts.proofScope)}`
+        how.style.userSelect = 'text'
+        how.style.overflowWrap = 'anywhere'
+        gate.append(how)
+      }
+      body.append(gate)
+    }
+
     const write = el('button', 'evm-btn evm-btn--primary evm-btn--sm', 'Write a post')
     write.setAttribute('data-testid', 'forum-write')
     write.addEventListener('click', async () => {
@@ -3033,9 +3165,11 @@ async function openForumModal(rootHash: string): Promise<void> {
     footer.append(write)
 
     if (!facts.iAmMember) {
-      const join = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Request to join')
+      const join = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', facts.requires ? 'Join with a passport proof…' : 'Request to join')
       join.setAttribute('data-testid', 'forum-join')
-      join.title = 'Asking is not joining: only the keeper can publish a roster that names you.'
+      join.title = facts.requires
+        ? 'Starts a passport proof letter for this forum. Publishing one that meets the rule is what makes you a member.'
+        : 'Asking is not joining: only the keeper can publish a roster that names you.'
       join.addEventListener('click', async () => {
         const r = await shell.requestJoin(rootHash)
         if (!r.id) return showText(`Could not start a request: ${String(r.error ?? 'unknown')}`, 'danger')
@@ -3443,6 +3577,227 @@ function renderWelcomePane(show: boolean): void {
   cageArea.append(pane)
 }
 
+/**
+ * A ballot's count and controls. The count is the shell's: every valid vote
+ * held, one per passport, and -- once enough of the named witnesses have closed
+ * the ballot -- only the votes those witnesses listed. Until then it is called
+ * provisional, because it is: another reader may hold different votes.
+ */
+let ballotSlot: HTMLElement | null = null
+
+function ballotBits(ballotHash: string, b: BallotFacts | { error: string }): HTMLElement[] {
+  if ('error' in b) {
+    const bad = el('span', 'evm-badge evm-badge--neutral', 'ballot: cannot be read')
+    bad.setAttribute('data-testid', 'header-ballot')
+    bad.setAttribute('data-state', 'unreadable')
+    bad.title = String(b.error)
+    return [bad]
+  }
+  const line = b.options.map((o, i) => `${o.length > 18 ? `${o.slice(0, 17)}…` : o} ${b.counts[i] ?? 0}`).join(' · ')
+  const count = el('span', `evm-badge evm-badge--${b.closed ? 'success' : 'warning'}`, `${b.closed ? 'Final' : 'Provisional'}: ${line}`)
+  count.setAttribute('data-testid', 'header-ballot')
+  count.setAttribute('data-state', b.closed ? 'final' : 'provisional')
+  count.setAttribute('data-counts', b.counts.join(','))
+  count.title =
+    (b.closed
+      ? `Closed by ${b.closings} of its ${b.witnesses.length} witnesses (${b.quorum} needed). Counted: the ${b.counted} vote(s) at least ${b.quorum} of them listed.` +
+        (b.unwitnessed ? ` ${b.unwitnessed} valid vote(s) you hold were not listed by enough witnesses and are not counted.` : '')
+      : `Not closed: ${b.closings} of the ${b.quorum} witness closings needed. This counts the ${b.counted} valid vote(s) YOU hold, one per passport; someone else may hold others.`) +
+    (b.unchecked ? `\n${b.unchecked} vote(s) are still being checked.` : '') +
+    `\nWho may vote: ${b.rule}.`
+  const out: HTMLElement[] = [count]
+  if (b.myVote) {
+    const mine = el('span', 'sh-hint', b.myVote.counted ? 'your vote is counted' : b.closed ? 'your vote was not listed in time' : 'your vote is not counted yet')
+    mine.setAttribute('data-testid', 'header-ballot-mine')
+    mine.title = 'Your vote on this ballot is signed by a key made for this ballot alone. Only this computer can tell it is yours.'
+    out.push(mine)
+  }
+  if (!b.closed) {
+    const voteBtn = el('button', 'evm-btn evm-btn--primary evm-btn--sm', b.myVote ? 'Change vote…' : 'Vote…')
+    voteBtn.setAttribute('data-testid', 'header-ballot-vote')
+    voteBtn.addEventListener('click', () => openBallotVoteModal(ballotHash, b))
+    out.push(voteBtn)
+  }
+  if (b.iAmWitness && !b.iHaveClosed) {
+    const closeBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Close ballot…')
+    closeBtn.setAttribute('data-testid', 'header-ballot-close')
+    closeBtn.title = b.pastClose
+      ? 'Publish, under your own key, the list of valid votes you hold now. Votes you do not list will need the other witnesses to count.'
+      : 'This ballot has not reached the time its author asked witnesses to close it.'
+    closeBtn.addEventListener('click', async () => {
+      const r = await shell.ballotClose(ballotHash)
+      if (r.error) return showText(`Could not close: ${r.error}`, 'danger')
+      showText(`Closing statement published, listing ${r.listed ?? 0} vote(s)`, 'success')
+    })
+    out.push(closeBtn)
+  }
+  return out
+}
+
+/**
+ * Voting. A vote needs passport proofs bound to a key made for this ballot
+ * alone, so the dialog first says what to make them for; then takes the
+ * resulting package and the choice. Souspli checks the proofs before it signs
+ * anything, and signs with that one-time key -- never with your identity.
+ */
+function openBallotVoteModal(ballotHash: string, b: BallotFacts): void {
+  const overlay = el('div', 'evm-modal-overlay')
+  const modal = el('div', 'evm-modal')
+  modal.setAttribute('data-testid', 'ballot-vote-modal')
+  const header = el('div', 'evm-modal-header')
+  header.append(el('span', 'evm-modal-title', b.question))
+  const body = el('div', 'evm-modal-body')
+  const footer = el('div', 'evm-modal-footer')
+
+  const how = el('div', 'sh-hint')
+  how.setAttribute('data-testid', 'ballot-vote-how')
+  how.style.userSelect = 'text'
+  how.style.overflowWrap = 'anywhere'
+  how.textContent = `Who may vote: ${b.rule}. Make a proof package for the address ${b.voteAddress} with the scope ${b.voteScope}, then choose it below. That address is a key for this ballot only: it is not your identity and cannot be linked to it by anyone else.`
+  body.append(how)
+
+  let choice = -1
+  const picks = el('div')
+  b.options.forEach((o, i) => {
+    const row = el('label', 'sh-feed-item')
+    const radio = el('input') as HTMLInputElement
+    radio.type = 'radio'
+    radio.name = 'ballot-choice'
+    radio.setAttribute('data-testid', `ballot-option-${i}`)
+    radio.addEventListener('change', () => {
+      choice = i
+    })
+    row.append(radio, el('span', undefined, ` ${o}`))
+    picks.append(row)
+  })
+  const file = el('input') as HTMLInputElement
+  file.type = 'file'
+  file.accept = '.json,application/json'
+  file.setAttribute('data-testid', 'ballot-vote-file')
+  const problem = el('div', 'sh-hint')
+  problem.setAttribute('data-testid', 'ballot-vote-error')
+  body.append(el('div', 'evm-section-heading', 'Your choice'), picks, el('div', 'evm-section-heading', 'Your proof package'), file, problem)
+
+  const cast = el('button', 'evm-btn evm-btn--primary', 'Cast vote')
+  cast.setAttribute('data-testid', 'ballot-vote-cast')
+  cast.addEventListener('click', async () => {
+    const f = file.files?.[0]
+    if (choice < 0) return void (problem.textContent = 'Choose an option.')
+    if (!f) return void (problem.textContent = 'Choose your proof package.')
+    cast.setAttribute('disabled', '')
+    problem.textContent = 'Checking the proofs…'
+    const r = await shell.ballotCast(ballotHash, choice, await f.text())
+    cast.removeAttribute('disabled')
+    if (r.error) return void (problem.textContent = r.error)
+    overlay.remove()
+    showText('Vote cast under a one-time key. Pass it on to the witnesses to be counted.', 'success')
+  })
+  const cancel = el('button', 'evm-btn evm-btn--ghost', 'Cancel')
+  cancel.addEventListener('click', () => overlay.remove())
+  footer.append(cancel, cast)
+  modal.append(header, body, footer)
+  overlay.append(modal)
+  document.body.append(trackOverlay(overlay))
+}
+
+/** YYMMDD as the chip has it, spaced for reading. The century is not recorded, so none is invented. */
+function mrzDate(yymmdd: string): string {
+  return /^\d{6}$/.test(yymmdd) ? `${yymmdd.slice(0, 2)}-${yymmdd.slice(2, 4)}-${yymmdd.slice(4, 6)} (YY-MM-DD)` : yymmdd
+}
+
+/**
+ * A verified passport PROOF: what was proved, and nothing about who. The claims
+ * shown are the ones the shell checked the proofs against -- not the letter's
+ * wording. Everything else about the passport stays unknown, which the tooltip
+ * says, along with the two limits a reader should know: when it was true, and
+ * that a proof shows possession of a passport's signed data, not of the booklet.
+ */
+function proofBadges(p: Extract<CredentialFacts, { kind: 'passport-proof'; status: 'verified' }>['proof']): HTMLElement[] {
+  const claims: string[] = []
+  if (p.minAge !== undefined) claims.push(`${p.minAge}+`)
+  if (p.nationalityIn) {
+    claims.push(
+      p.nationalityIn.length === 1
+        ? `citizen of ${p.nationalityIn[0]}`
+        : p.nationalityIn.length <= 4
+          ? `citizen of one of ${p.nationalityIn.join(', ')}`
+          : `citizen of one of ${p.nationalityIn.length} countries`
+    )
+  }
+  const b = el('span', 'evm-badge evm-badge--success', `✓ passport proof: ${claims.length ? claims.join(' · ') : 'holds a passport'}`)
+  b.setAttribute('data-testid', 'header-credential')
+  b.setAttribute('data-credential', 'verified')
+  const day = new Date(p.provedAt * 1000).toISOString().slice(0, 10)
+  b.title =
+    `A zero-knowledge proof, checked by Souspli: the author's key is bound to a passport that was valid on ${day}` +
+    `${p.minAge !== undefined ? `, whose holder was at least ${p.minAge} that day` : ''}` +
+    `${p.nationalityIn ? `, with nationality ${p.nationalityIn.join(' or ')}` : ''}.\n` +
+    `Its signatures chain to: ${p.anchor}.\n` +
+    'The name, the document number and everything else about the passport stay hidden.\n' +
+    'It shows possession of the passport\'s signed data, which the issuing state and anyone who has read the chip also hold.\n' +
+    `Scope: ${p.scope}${p.subscope ? ` / ${p.subscope}` : ''}. In this scope, this passport always shows the mark ${p.nullifier.slice(0, 12)}…`
+  return [b]
+}
+
+/**
+ * The header's account of a credential letter. Three different things can be
+ * true and each gets its own words:
+ *   - the DATA is a genuine passport's (signatures chain to a state certificate
+ *     the app ships) -- the one place this earns a ✓;
+ *   - the passport's CHIP signed this author's key, so the author held the
+ *     passport -- said separately, and its absence is a warning, because
+ *     genuine data alone can be republished by anyone holding a copy;
+ *   - or the check failed, or could not be made, which are not the same.
+ */
+function credentialBadges(c: CredentialFacts | null): HTMLElement[] {
+  if (!c) return []
+  if (c.status !== 'verified') {
+    const failed = c.status === 'invalid'
+    const what = c.kind === 'passport-proof' ? 'passport proof' : 'passport'
+    const b = el('span', `evm-badge evm-badge--${failed ? 'danger' : 'neutral'}`, failed ? `✗ ${what} check failed` : `${what}: cannot be checked`)
+    b.setAttribute('data-testid', 'header-credential')
+    b.setAttribute('data-credential', c.status)
+    b.title = failed
+      ? c.kind === 'passport-proof'
+        ? `These proofs do not show what the letter says for this author: ${c.reason}.`
+        : `This is not a genuine passport reading for this author: ${c.reason}.`
+      : `Souspli could not check this: ${c.reason}. That says nothing either way about whether it is genuine.`
+    return [b]
+  }
+  if (c.kind === 'passport-proof') return proofBadges(c.proof)
+  const p = c.passport
+  const who = [p.surname, p.givenNames].filter(Boolean).join(', ')
+  const shown = who.length > 32 ? `${who.slice(0, 31)}…` : who
+  const data = el('span', 'evm-badge evm-badge--success', `✓ passport: ${shown || '(no name)'} · ${p.nationality}`)
+  data.setAttribute('data-testid', 'header-credential')
+  data.setAttribute('data-credential', 'verified')
+  data.title =
+    `Genuine passport data: its signatures chain to ${p.anchor}, which ships with Souspli.\n` +
+    `Name: ${who}\nNationality: ${p.nationality} · issued by ${p.issuingState} · type ${p.documentType}\n` +
+    `Document number: ${p.documentNumber}\nBorn: ${mrzDate(p.dateOfBirth)} · sex ${p.sex || 'unspecified'}\nExpires: ${mrzDate(p.dateOfExpiry)}`
+  const out = [data]
+  if (p.expired) {
+    const e = el('span', 'evm-badge evm-badge--warning', 'expired')
+    e.setAttribute('data-testid', 'header-credential-expired')
+    e.title = 'This passport is past its expiry date by this computer\'s clock.'
+    out.push(e)
+  }
+  const chip =
+    p.chip === 'signed'
+      ? el('span', 'evm-badge evm-badge--success', '✓ chip signed this key')
+      : el('span', 'evm-badge evm-badge--warning', 'not tied to this key')
+  chip.setAttribute('data-testid', 'header-credential-chip')
+  chip.setAttribute('data-chip', p.chip)
+  chip.title =
+    p.chip === 'signed'
+      ? "The passport's chip signed this author's key, so whoever holds that key held the physical passport."
+      : p.chip === 'unsupported'
+        ? "This passport's chip signature is of a kind this version cannot check. Without it, anyone holding a copy of this data could have published it."
+        : 'The letter carries no signature from the passport\'s chip. The data is genuine, but anyone holding a copy of it could have published it under their own key.'
+  out.push(chip)
+  return out
+}
+
 function renderHeader(h: HeaderFacts | null): void {
   thingHeader.replaceChildren()
   refitHeader = null
@@ -3531,6 +3886,17 @@ function renderHeader(h: HeaderFacts | null): void {
     b.title =
       'Sealed: only the people it was sealed to can open it, and nobody else can tell who they are. Any of them can pass it on, with the signature intact.'
     privateBits.push(b)
+  }
+  // A ballot's count changes as votes and closings arrive, so it lives in a
+  // slot of its own that is redrawn on its own (see onFeedChanged).
+  ballotSlot = null
+  const credentialBits = credentialBadges(h.credential ?? null)
+  if (h.ballot) {
+    ballotSlot = el('span')
+    ballotSlot.style.display = 'contents'
+    ballotSlot.setAttribute('data-envelope-hash', h.envelopeHash)
+    ballotSlot.append(...ballotBits(h.envelopeHash, h.ballot))
+    credentialBits.push(ballotSlot)
   }
   const hashEl = el('span', 'sh-hash evm-address evm-address--muted', short(h.envelopeHash, 8))
   // Copy: the shell-level "edit this object" primitive — things are immutable,
@@ -3845,6 +4211,7 @@ function renderHeader(h: HeaderFacts | null): void {
     ...seatBits,
     typeBadge,
     ...privateBits,
+    ...credentialBits,
     renderModeToggle(),
     pub,
     el('span', 'sh-spacer'),
@@ -4205,6 +4572,21 @@ forumBtn.addEventListener('click', () => {
 shell.onFeedChanged(() => {
   forumPage.refresh()
   void refreshFeed()
+  // An open ballot is recounted whenever the library changes: a vote arrived,
+  // a verdict on one landed, a witness closed.
+  if (selected && ballotSlot && ballotSlot.getAttribute('data-envelope-hash') === selected) {
+    const asked = selected
+    const slot = ballotSlot
+    void shell
+      .ballot(asked)
+      .then((b) => {
+        if (ballotSlot !== slot || slot.getAttribute('data-envelope-hash') !== asked) return
+        slot.replaceChildren(...ballotBits(asked, b as unknown as BallotFacts | { error: string }))
+      })
+      .catch(() => {
+        /* a stale count is redrawn on the next change */
+      })
+  }
   // Keep the comment count fresh without rebuilding the header (a rebuild
   // would re-run renderModeToggle and move the pinned controls).
   if (selected && repliesBadge && !selected.startsWith('draft:')) {

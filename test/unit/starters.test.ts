@@ -23,6 +23,9 @@ const sampleBytes = (type: string): Uint8Array =>
 const TYPE_IDENTITY: Record<string, string> = {
   article: '38f1b4f5d8d83b064c96f6089b2764116a88127dd75aaa173e52bb283efd40c0',
   attestation: 'de547e4ce53e539928988d45693fd00045ec9cfc9548ad4112c7a96c15463d3e',
+  ballot: 'ea620d2decfb136fefaa0fb1c1043bc587931d0fd90ed3d880831f044085833b',
+  'ballot-close': '065b11d06734c7dabf61cbb9d7bec9749702461b3ca5a339095c4293d56f37e8',
+  'ballot-vote': 'ba717df33d75e3a4023b9c48bd978874116687d3e6e62447ddd3f6e2ee006545',
   card: '861f1dfb441c6cd2ffad53ca3e86eb36c63d0c7e896e826710234b28c1e8abe2',
   comment: 'a1c64fba1dae21454999630dfc54e24146e44544e24a228e9c53d75432ae098b',
   contract: 'aa73e76b5e5b4b155c15e84b1288e20492bf1ab5033bf24fc7b8144dd175b2f0',
@@ -32,6 +35,8 @@ const TYPE_IDENTITY: Record<string, string> = {
   'join-request': 'ae2bfcc6c6f11ea07e7a954a6ec2abcf86d77c7e76078dcb601a593a73ef2cc7',
   memo: '2358d30a800fd69b618991a488404ad7ea99d0fa46d3470cfd5287af925562f6',
   nametag: 'a9617356275434724d949f7b6733bec40a29a4ef6ee86071e38978547687e36a',
+  passport: '7919ab827ad6d9f65b09971f1e637ab4e0cc9d96eadcf35e4b1cb8cb9f42ada2',
+  'passport-proof': '428d6a986ac8393d06d50ee25061e9687f36e5606d4754d3cc6f29aee5bca825',
   post: '96d63e37ec246bf7b8a729fd099516eeeea783ab5329e11d3336b1fc1d5a0381',
   poster: 'd147eba4228a3e121a7d1b775382a5a9dde4d7f34345e1ca7c0805d141fd3f90',
   todo: '2b5c7fd640484ab616b59db724b58c1beff303145459834c87fc987ebc183f64',
@@ -41,10 +46,13 @@ const TYPE_IDENTITY: Record<string, string> = {
 
 describe('starters', () => {
   it('ships every sample', () => {
-    expect(STARTERS.length).toBe(16)
+    expect(STARTERS.length).toBe(21)
     expect([...STARTERS].map((s) => s.type).sort()).toEqual([
       'article',
       'attestation',
+      'ballot',
+      'ballot-close',
+      'ballot-vote',
       'card',
       'comment',
       'contract',
@@ -54,6 +62,8 @@ describe('starters', () => {
       'join-request',
       'memo',
       'nametag',
+      'passport',
+      'passport-proof',
       'post',
       'poster',
       'todo',
@@ -81,9 +91,9 @@ describe('starters', () => {
   })
 
   it('has distinct keys, types, and programs', () => {
-    expect(new Set(STARTERS.map((s) => s.key)).size).toBe(16)
-    expect(new Set(STARTERS.map((s) => s.type)).size).toBe(16)
-    expect(new Set(STARTERS.map((s) => s.html)).size).toBe(16)
+    expect(new Set(STARTERS.map((s) => s.key)).size).toBe(21)
+    expect(new Set(STARTERS.map((s) => s.type)).size).toBe(21)
+    expect(new Set(STARTERS.map((s) => s.html)).size).toBe(21)
   })
 
   it('resolves by key and rejects unknown keys', () => {

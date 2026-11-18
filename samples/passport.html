@@ -1,0 +1,191 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>passport</title>
+<style>
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: #1d2320; color: #222;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh;
+         padding: 24px; box-sizing: border-box; }
+  .page { background: #f7f5ee; width: 34em; max-width: 100%; border-radius: 8px; padding: 24px 28px;
+          box-sizing: border-box; box-shadow: 0 12px 32px rgba(0, 0, 0, .5); }
+  h1 { margin: 0 0 2px; font-size: 13px; letter-spacing: .22em; text-transform: uppercase; color: #1f4e79; }
+  .state { margin: 0 0 16px; font-size: 22px; font-weight: 700; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px; }
+  .field .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #6b6b6b; }
+  .field .v { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+  .wide { grid-column: 1 / -1; }
+  .note { margin-top: 16px; padding-top: 12px; border-top: 1px solid #d8d4c6; font-size: 13px; color: #555; }
+  .warn { margin-top: 12px; padding: 10px 12px; border-radius: 6px; background: #fff3cd; color: #5c4400; font-size: 13px; }
+  .err { color: #a12622; font-size: 13px; margin-top: 8px; }
+  input[type=file] { font: inherit; margin-top: 8px; max-width: 100%; }
+  code { font-size: 12px; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+  <div class="page"><div id="app"></div></div>
+  <script>
+    'use strict';
+    // State: args { dg1, sod, dg15, aaResponse } -- base64 strings, the files a
+    // passport chip gave up. dg1 is the identity data; sod is the issuing
+    // state's signature over its hash; dg15 and aaResponse, when present, are
+    // the chip's own key and its signature over the AUTHOR'S key.
+    //
+    // This program only SHOWS what dg1 says. It verifies nothing and could not
+    // if it tried: it cannot see who signed the letter, so it cannot tell
+    // whether a chip signature is about that key, and a tick drawn here would
+    // be pixels any look-alike type could draw. Souspli checks the signatures
+    // itself and says what it found in the header. So: no tick anywhere below.
+    var a = window.bridge.getArgs() || {};
+    var args = (a && typeof a.args === 'object' && a.args !== null) ? a.args : {};
+    var app = document.getElementById('app');
+
+    function str(v) { return typeof v === 'string' ? v : ''; }
+    function el(tag, text, cls) {
+      var e = document.createElement(tag);
+      if (text !== undefined) e.textContent = text;
+      if (cls) e.className = cls;
+      return e;
+    }
+    function fromBase64(s) {
+      try {
+        var bin = atob(s), out = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out;
+      } catch (e) { return null; }
+    }
+    function hexToBase64(hex) {
+      if (!/^([0-9a-fA-F]{2})+$/.test(hex)) return '';
+      var bin = '';
+      for (var i = 0; i < hex.length; i += 2) bin += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16));
+      return btoa(bin);
+    }
+
+    // DG1 is `61 len 5F1F len <MRZ>`. Returns the fields, or null if it is not one.
+    function readMrz(dg1) {
+      if (!dg1) return null;
+      var at = -1;
+      for (var i = 0; i + 1 < dg1.length && i < 8; i++) if (dg1[i] === 0x5f && dg1[i + 1] === 0x1f) { at = i + 2; break; }
+      if (at < 0) return null;
+      var len = dg1[at++];
+      if (len === 0x81) len = dg1[at++];
+      var mrz = '';
+      for (var j = at; j < at + len && j < dg1.length; j++) mrz += String.fromCharCode(dg1[j]);
+      if (!/^[A-Z0-9<]+$/.test(mrz)) return null;
+      function clean(s) { return s.replace(/<+$/, '').replace(/</g, ' ').trim(); }
+      function names(s) { var p = s.split('<<'); return { surname: clean(p[0] || ''), given: clean(p[1] || '') }; }
+      var n, l2;
+      if (mrz.length === 88) {
+        l2 = mrz.slice(44); n = names(mrz.slice(5, 44));
+        return { type: clean(mrz.slice(0, 2)), state: clean(mrz.slice(2, 5)), surname: n.surname, given: n.given,
+                 number: clean(l2.slice(0, 9)), nationality: clean(l2.slice(10, 13)), born: l2.slice(13, 19),
+                 sex: clean(l2.slice(20, 21)), expires: l2.slice(21, 27) };
+      }
+      if (mrz.length === 90) {
+        l2 = mrz.slice(30, 60); n = names(mrz.slice(60));
+        return { type: clean(mrz.slice(0, 2)), state: clean(mrz.slice(2, 5)), surname: n.surname, given: n.given,
+                 number: clean(mrz.slice(5, 14)), nationality: clean(l2.slice(15, 18)), born: l2.slice(0, 6),
+                 sex: clean(l2.slice(7, 8)), expires: l2.slice(8, 14) };
+      }
+      return null;
+    }
+    // The chip stores two-digit years. Shown as stored rather than guessing a century.
+    function date(s) { return /^\d{6}$/.test(s) ? s.slice(0, 2) + '-' + s.slice(2, 4) + '-' + s.slice(4, 6) : (s || '—'); }
+
+    function field(label, value, wide) {
+      var f = el('div', undefined, 'field' + (wide ? ' wide' : ''));
+      f.append(el('div', label, 'k'), el('div', value || '—', 'v'));
+      return f;
+    }
+
+    function dataPage(data) {
+      var frag = document.createDocumentFragment();
+      var m = readMrz(fromBase64(str(data.dg1)));
+      frag.append(el('h1', 'Passport'));
+      if (!m) {
+        frag.append(el('p', str(data.dg1) ? 'This letter’s passport data cannot be read.' : 'No passport reading yet.', 'state'));
+        return frag;
+      }
+      var state = el('p', m.state, 'state'); state.id = 'view-state';
+      var grid = el('div', undefined, 'grid');
+      var name = field('Surname', m.surname, true); name.querySelector('.v').id = 'view-surname';
+      grid.append(name, field('Given names', m.given, true), field('Nationality', m.nationality),
+        field('Document number', m.number), field('Date of birth (YY-MM-DD)', date(m.born)),
+        field('Date of expiry (YY-MM-DD)', date(m.expires)), field('Sex', m.sex), field('Type', m.type));
+      frag.append(state, grid);
+      return frag;
+    }
+
+    function viewMode() {
+      app.replaceChildren(dataPage(args));
+      var note = el('div', undefined, 'note'); note.id = 'view-note';
+      note.textContent = 'This page shows what the letter’s data says. Whether it is a genuine passport, and whether ' +
+        'that passport’s chip signed the author’s key, is checked by Souspli and stated in the header above — not here.';
+      app.append(note);
+    }
+
+    function editMode() {
+      var current = { dg1: str(args.dg1), sod: str(args.sod), dg15: str(args.dg15), aaResponse: str(args.aaResponse) };
+      var status = el('div', undefined, 'note');
+      var error = el('div', undefined, 'err'); error.id = 'edit-error';
+      var preview = el('div');
+
+      function emit() {
+        var out = {};
+        if (current.dg1) out.dg1 = current.dg1;
+        if (current.sod) out.sod = current.sod;
+        // The chip's key and signature travel together or not at all.
+        if (current.dg15 && current.aaResponse) { out.dg15 = current.dg15; out.aaResponse = current.aaResponse; }
+        window.bridge.emit('draft', { type: 'passport', args: out });
+      }
+      function render() {
+        preview.replaceChildren(dataPage(current));
+      }
+      // The file the NFC ID reader app exports: { files: { DG1, 'EF.SOD', DG15 }, chipAuth: {…} }.
+      function load(text) {
+        var exp;
+        try { exp = JSON.parse(text); } catch (e) { error.textContent = 'That file is not a passport export (not JSON).'; return; }
+        var files = exp && typeof exp.files === 'object' && exp.files ? exp.files : {};
+        if (!str(files.DG1) || !str(files['EF.SOD'])) { error.textContent = 'That file has no passport data (DG1 and EF.SOD).'; return; }
+        error.textContent = '';
+        var auth = exp.chipAuth && typeof exp.chipAuth === 'object' ? exp.chipAuth : {};
+        var bound = str(auth.aaBoundAddressHex);
+        current = { dg1: files.DG1, sod: files['EF.SOD'], dg15: '', aaResponse: '' };
+        // Only a response to the challenge derived from a Souspli address is of
+        // any use. One to a random challenge would make the letter fail its check.
+        if (bound && str(auth.status) === 'Passed' && str(files.DG15) && str(auth.aaResponseHex)) {
+          current.dg15 = files.DG15;
+          current.aaResponse = hexToBase64(auth.aaResponseHex);
+        }
+        status.replaceChildren();
+        if (current.aaResponse) {
+          status.append('The chip signed the Souspli address ', el('code', '0x' + bound.toLowerCase()),
+            '. Publish from that identity: under any other, Souspli will report that the check failed.');
+        } else {
+          status.append('This reading has no chip signature for a Souspli address, so the header will say the passport ' +
+            'is not tied to your key. To get one, enter your Souspli address in the reader app before scanning.');
+        }
+        render(); emit();
+      }
+
+      var pick = el('input'); pick.type = 'file'; pick.accept = '.json,application/json'; pick.id = 'edit-file';
+      pick.addEventListener('change', function () {
+        var f = pick.files && pick.files[0];
+        if (!f) return;
+        if (f.size > 1024 * 1024) { error.textContent = 'That file is too large to be a passport export.'; return; }
+        f.text().then(load);
+      });
+      var warn = el('div', undefined, 'warn'); warn.id = 'edit-warning';
+      warn.textContent = 'A passport letter shows everyone who receives it your name, date of birth and document number. ' +
+        'It also hands them the signed data itself, which is all anyone needs to prove “a citizen of this country” or ' +
+        '“over eighteen” in your place. Send it privately, to people you would hand the passport to.';
+      var intro = el('div', 'Choose the passport export saved by the NFC ID reader app.');
+      app.replaceChildren(el('h1', 'Passport — new reading'), intro, pick, error, status, preview, warn);
+      if (current.dg1) render();
+      emit(); // initial state, so the header's Publish reflects what is held
+    }
+
+    if (a.mode === 'edit') editMode(); else viewMode();
+  </script>
+</body>
+</html>

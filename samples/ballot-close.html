@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>ballot closing</title>
+<style>
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: #1d2320; color: #222;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh;
+         padding: 24px; box-sizing: border-box; }
+  .page { background: #f7f5ee; width: 32em; max-width: 100%; border-radius: 8px; padding: 24px 28px;
+          box-sizing: border-box; box-shadow: 0 12px 32px rgba(0, 0, 0, .5); }
+  h1 { margin: 0 0 12px; font-size: 13px; letter-spacing: .22em; text-transform: uppercase; color: #1f4e79; }
+  .big { font-size: 20px; font-weight: 700; }
+  .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #6b6b6b; margin-top: 12px; }
+  .v { font-size: 13px; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
+  .note { margin-top: 16px; padding-top: 12px; border-top: 1px solid #d8d4c6; font-size: 13px; color: #555; }
+</style>
+</head>
+<body>
+  <div class="page"><div id="app"></div></div>
+  <script>
+    'use strict';
+    // A witness's closing statement for a secret ballot.
+    //
+    // State: args { attests: <the ballot's hash>, votes: <the hashes of the votes this
+    //               witness held when it closed the ballot: 64 hex characters each, sorted,
+    //               end to end> }.
+    //
+    // A vote counts once the ballot is closed only if enough of the ballot's named witnesses
+    // list it. This is one witness's list, made by Souspli from the valid votes that witness
+    // held. It is evidence only from a key the ballot names; from anyone else it is noise,
+    // and Souspli ignores it. This program shows how long the list is and nothing more.
+    var a = window.bridge.getArgs() || {};
+    var args = (a && typeof a.args === 'object' && a.args !== null) ? a.args : {};
+    var app = document.getElementById('app');
+    function el(tag, text, cls) { var e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (cls) e.className = cls; return e; }
+    function str(v) { return typeof v === 'string' ? v : ''; }
+    var votes = str(args.votes);
+    var ok = votes.length % 64 === 0 && /^[0-9a-f]*$/.test(votes);
+    var count = el('div', ok ? (votes.length / 64 === 1 ? '1 vote listed' : (votes.length / 64) + ' votes listed') : 'A list that cannot be read', 'big');
+    count.id = 'close-count';
+    var target = el('div', str(args.attests) || '—', 'v'); target.id = 'close-ballot';
+    var note = el('div', undefined, 'note'); note.id = 'view-note';
+    note.textContent = a.mode === 'edit'
+      ? 'A closing statement is not written here. A witness opens the ballot and uses Close ballot in its header.'
+      : 'This is one key’s list of the votes it held. It matters only if the ballot names that key as a witness, which Souspli checks on the ballot itself.';
+    app.append(el('h1', 'Secret ballot — closing statement'), count, el('div', 'For the ballot', 'k'), target, note);
+    if (a.mode === 'edit') window.bridge.emit('draft', { type: 'ballot-close', args: args });
+  </script>
+</body>
+</html>
