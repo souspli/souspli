@@ -131,6 +131,20 @@ function deriveNostrKey(privkey: Uint8Array): Uint8Array {
   return sha256(sig)
 }
 
+/** Domain separation for one-time ballot keys. */
+export const BALLOT_KEY_DOMAIN = 'souspli-ballot-key-v1:'
+
+/**
+ * The one-time secret an identity votes with on one ballot: the hash of the
+ * identity's signature over the ballot's hash, exactly as the Nostr key is
+ * derived. Nobody without the identity key can link it to the identity or
+ * compute it; the identity can always derive it again, so nothing is stored.
+ * Exported for tests.
+ */
+export function deriveBallotKey(privkey: Uint8Array, ballotHash: string): Uint8Array {
+  return sha256(ethPersonalSign(privkey, new TextEncoder().encode(BALLOT_KEY_DOMAIN + ballotHash)))
+}
+
 /** conversation_key = HKDF-extract("nip44-v2", ecdh_x). Computed HERE, in the
  *  keyring, so `format` never sees the identity key — it only receives the
  *  derived symmetric conversation key via nip44Decrypt. */
@@ -275,6 +289,25 @@ export class Keyring {
       sign: async (signingInput: Uint8Array) => {
         if (this.#locked) throw new Error('keyring is locked')
         return ethPersonalSign(this.#privkey, signingInput)
+      }
+    }
+  }
+
+  /**
+   * A Signer for this identity's one-time key on one ballot. A secret-ballot
+   * vote is signed by this key and by nothing that names you. As with the
+   * identity key, only the ability to sign leaves here, never the secret.
+   */
+  ballotSigner(ballotHash: string): Signer {
+    if (this.#locked) throw new Error('keyring is locked')
+    if (!/^[0-9a-f]{64}$/.test(ballotHash)) throw new Error('bad ballot hash')
+    const secret = deriveBallotKey(this.#privkey, ballotHash)
+    return {
+      scheme: 'eth-eip191',
+      pubkey: ethAddress(secret),
+      sign: async (signingInput: Uint8Array) => {
+        if (this.#locked) throw new Error('keyring is locked')
+        return ethPersonalSign(secret, signingInput)
       }
     }
   }

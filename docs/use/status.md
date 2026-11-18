@@ -43,6 +43,7 @@ macOS, Windows and Linux):
 | **Spam protection in the community forum** | Its points are raw upvotes, which anyone can manufacture, and anyone can post. Moderators can fold posts; nothing yet stops a flood. |
 | **Opening enclosed PDFs and documents** | They travel intact and can be exported, but the container cannot display them. |
 | **Mobile, or a web viewer** | Desktop only. |
+| **Passports beyond the basics** | Readings, proofs, gated forums and secret ballots [work](passport.md), with limits: certificates for Canada only, no revocation lists, reading needs a separate Android app and proving a command-line tool, a proof letter is too large to travel inline on a relay, and a vote is not hidden from the relay's view of your network address. Not reviewed by anyone outside the project. |
 
 ## Likely to change
 

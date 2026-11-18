@@ -7,6 +7,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 //   out/main/index.js         — the cage test harness (the escape suite runs it)
 //   out/main/shell/main.js     — the shell (trusted client)
 //   out/main/shell/admission-worker.js — the isolated structural-decode worker
+//   out/main/shell/credential-worker.js — the isolated passport/proof checker
 //
 // The format code lives in this repo (src/format) and is bundled as source.
 // @noble/* and zod are BUNDLED (not externalized) so the CJS main can use these
@@ -16,7 +17,10 @@ const BUNDLED = ['@noble/curves', '@noble/hashes', '@noble/ciphers', 'zod', '@sc
 // `webtorrent` is an OPTIONAL, lazily-imported transport (magnet:); keep it
 // external so the build never tries to bundle it when it is not installed.
 // `electron-updater` loads lazily, on the first update check, from node_modules.
-const EXTERNAL = ['electron', 'better-sqlite3', 'webtorrent', 'electron-updater']
+// `@aztec-foundation/bb.js` is the zero-knowledge proof verifier: megabytes of
+// WebAssembly, loaded only by the credential worker and only for a letter that
+// carries proofs.
+const EXTERNAL = ['electron', 'better-sqlite3', 'webtorrent', 'electron-updater', '@aztec-foundation/bb.js']
 
 export default defineConfig({
   main: {
@@ -29,6 +33,8 @@ export default defineConfig({
           index: resolve(__dirname, 'src/main/index.ts'),
           'shell/main': resolve(__dirname, 'src/shell/main.ts'),
           'shell/admission-worker': resolve(__dirname, 'src/shell/admission/worker.ts'),
+          // The isolated passport/proof checker (credential/worker.ts).
+          'shell/credential-worker': resolve(__dirname, 'src/shell/credential/worker.ts'),
           // The command line without the app, for souspli.cmd (cli-entry.ts).
           'shell/cli': resolve(__dirname, 'src/shell/cli-entry.ts')
         },

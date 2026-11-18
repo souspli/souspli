@@ -1,0 +1,179 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>ballot</title>
+<style>
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: #1d2320; color: #222;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh;
+         padding: 24px; box-sizing: border-box; }
+  .page { background: #f7f5ee; width: 36em; max-width: 100%; border-radius: 8px; padding: 24px 28px;
+          box-sizing: border-box; box-shadow: 0 12px 32px rgba(0, 0, 0, .5); }
+  h1 { margin: 0 0 6px; font-size: 13px; letter-spacing: .22em; text-transform: uppercase; color: #1f4e79; }
+  h2 { margin: 0 0 14px; font-size: 22px; }
+  ol { margin: 0 0 14px; padding-left: 1.4em; }
+  ol li { font-size: 17px; font-weight: 600; padding: 3px 0; }
+  .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #6b6b6b; margin-top: 12px; }
+  .v { font-size: 14px; overflow-wrap: anywhere; }
+  .key { font-family: ui-monospace, monospace; font-size: 12px; color: #555; }
+  .note { margin-top: 16px; padding-top: 12px; border-top: 1px solid #d8d4c6; font-size: 13px; color: #555; }
+  label { display: block; margin-top: 10px; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #6b6b6b; }
+  input, textarea { font: inherit; width: 100%; box-sizing: border-box; border: 1px solid #cfc9bd; border-radius: 4px;
+                    padding: 5px 8px; background: #fffef9; }
+  textarea { min-height: 4.5em; resize: vertical; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .hint { font-size: 12px; color: #777; }
+</style>
+</head>
+<body>
+  <div class="page"><div id="app"></div></div>
+  <script>
+    'use strict';
+    // A secret ballot.
+    //
+    // State: args { question, options: [text], requires: 'passport age>=18 nationality=CAN',
+    //               witnesses: [{ key, scheme, name }], quorum, closes (ISO time) }.
+    //
+    // `requires` says who may vote, in the one-line form Souspli reads. A vote
+    // is a separate letter, signed by a one-time key, carrying zero-knowledge
+    // passport proofs that meet this rule: one passport, one vote, no name.
+    //
+    // The WITNESSES are the deadline. No letter can prove when it was written,
+    // so a vote counts once the ballot is closed only if at least `quorum` of
+    // the named witnesses list it in their closing statements. `closes` is the
+    // time the author asks them to do that; it is a request, not a mechanism.
+    //
+    // This program shows the question. It does not count, cast or close:
+    // Souspli does those in the header, where the result cannot be drawn by a
+    // letter. Nothing below is a result.
+    var a = window.bridge.getArgs() || {};
+    var args = (a && typeof a.args === 'object' && a.args !== null) ? a.args : {};
+    var app = document.getElementById('app');
+    var info = window.bridge.viewerInfo ? window.bridge.viewerInfo() : {};
+
+    function str(v) { return typeof v === 'string' ? v : ''; }
+    function el(tag, text, cls) {
+      var e = document.createElement(tag);
+      if (text !== undefined) e.textContent = text;
+      if (cls) e.className = cls;
+      return e;
+    }
+    function options(src) {
+      return (Array.isArray(src.options) ? src.options : []).map(str).filter(function (o) { return o.trim(); });
+    }
+    function witnesses(src) {
+      var out = [];
+      (Array.isArray(src.witnesses) ? src.witnesses : []).forEach(function (w) {
+        if (w && typeof w === 'object' && str(w.key)) out.push({ key: str(w.key), scheme: str(w.scheme) || 'eth-eip191', name: str(w.name) });
+      });
+      return out;
+    }
+    // The rule in words. Mirrors what Souspli reads; anything else is shown as written.
+    function ruleWords(rule) {
+      var m = /^passport((?: \S+)*)$/.exec(rule.trim());
+      if (!m) return rule ? 'A rule this type cannot read: ' + rule : 'No rule is stated, so no vote can count.';
+      var parts = [];
+      m[1].trim().split(/\s+/).filter(Boolean).forEach(function (t) {
+        var age = /^age>=(\d+)$/.exec(t), nat = /^nationality=([A-Z,]+)$/.exec(t);
+        if (age) parts.push('aged ' + age[1] + ' or over');
+        else if (nat) parts.push('a citizen of ' + nat[1].split(',').join(' or '));
+        else parts.push(t);
+      });
+      return 'Holders of a valid passport' + (parts.length ? ': ' + parts.join(', ') : '') + '. One passport, one vote.';
+    }
+    function when(iso) {
+      var t = Date.parse(iso);
+      if (!isFinite(t)) return '';
+      try { return new Date(t).toLocaleString(info.locale || undefined, { dateStyle: 'long', timeStyle: 'short' }); }
+      catch (e) { return new Date(t).toISOString(); }
+    }
+
+    function viewMode() {
+      app.replaceChildren();
+      var q = el('h2', str(args.question) || 'No question yet'); q.id = 'ballot-question';
+      var list = el('ol'); list.id = 'ballot-options';
+      options(args).forEach(function (o) { list.append(el('li', o)); });
+      app.append(el('h1', 'Secret ballot'), q, list);
+
+      var rule = el('div', ruleWords(str(args.requires)), 'v'); rule.id = 'ballot-rule';
+      app.append(el('div', 'Who may vote', 'k'), rule);
+
+      var ws = witnesses(args);
+      var wv = el('div', undefined, 'v'); wv.id = 'ballot-witnesses';
+      ws.forEach(function (w) {
+        var line = el('div');
+        line.append(el('span', w.name ? w.name + ' ' : ''), el('span', w.key, 'key'));
+        wv.append(line);
+      });
+      var need = typeof args.quorum === 'number' ? args.quorum : 0;
+      app.append(el('div', 'Witnesses', 'k'), wv,
+        el('div', 'A vote counts once at least ' + need + ' of these ' + ws.length + ' list it when they close the ballot.', 'hint'));
+      if (when(str(args.closes))) {
+        var c = el('div', when(str(args.closes)), 'v'); c.id = 'ballot-closes';
+        app.append(el('div', 'Witnesses are asked to close it', 'k'), c);
+      }
+      var note = el('div', undefined, 'note'); note.id = 'view-note';
+      note.textContent = 'Everything on this page is the author’s wording. Voting, the count, and whether the ballot is closed ' +
+        'are in the header above, worked out by Souspli from the votes and closing statements you hold.';
+      app.append(note);
+    }
+
+    function editMode() {
+      function field(labelText, node, hint) {
+        var l = el('label', labelText);
+        var wrap = el('div'); wrap.append(l, node);
+        if (hint) wrap.append(el('div', hint, 'hint'));
+        return wrap;
+      }
+      var question = el('input'); question.id = 'edit-question'; question.value = str(args.question);
+      var opts = el('textarea'); opts.id = 'edit-options'; opts.value = options(args).join('\n');
+      var rule0 = /^passport((?: \S+)*)$/.exec(str(args.requires).trim());
+      var age0 = rule0 && /age>=(\d+)/.exec(rule0[1]), nat0 = rule0 && /nationality=([A-Z,]+)/.exec(rule0[1]);
+      var age = el('input'); age.id = 'edit-age'; age.type = 'number'; age.min = '1'; age.max = '149'; age.value = age0 ? age0[1] : '';
+      var nat = el('input'); nat.id = 'edit-nationality'; nat.value = nat0 ? nat0[1] : ''; nat.placeholder = 'CAN or CAN,USA';
+      var wit = el('textarea'); wit.id = 'edit-witnesses';
+      wit.value = witnesses(args).map(function (w) { return w.key + (w.name ? ' ' + w.name : ''); }).join('\n');
+      var quorum = el('input'); quorum.id = 'edit-quorum'; quorum.type = 'number'; quorum.min = '1';
+      quorum.value = typeof args.quorum === 'number' ? String(args.quorum) : '';
+      var closes = el('input'); closes.id = 'edit-closes'; closes.type = 'datetime-local';
+      var t0 = Date.parse(str(args.closes));
+      if (isFinite(t0)) { var d = new Date(t0 - new Date(t0).getTimezoneOffset() * 60000); closes.value = d.toISOString().slice(0, 16); }
+
+      function emit() {
+        var out = { question: question.value.trim() };
+        out.options = opts.value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
+        var terms = ['passport'];
+        var n = parseInt(age.value, 10);
+        if (n >= 1 && n <= 149) terms.push('age>=' + n);
+        var codes = nat.value.toUpperCase().split(/[\s,]+/).filter(function (c) { return /^[A-Z]{3}$/.test(c); });
+        if (codes.length) terms.push('nationality=' + codes.join(','));
+        out.requires = terms.join(' ');
+        out.witnesses = wit.value.split('\n').map(function (line) {
+          var m = /^\s*(?:0x)?([0-9a-fA-F]{40})\s*(.*)$/.exec(line);
+          return m ? { key: m[1].toLowerCase(), scheme: 'eth-eip191', name: m[2].trim() } : null;
+        }).filter(Boolean);
+        var qn = parseInt(quorum.value, 10);
+        if (qn >= 1) out.quorum = qn;
+        var ct = Date.parse(closes.value);
+        if (isFinite(ct)) out.closes = new Date(ct).toISOString();
+        window.bridge.emit('draft', { type: 'ballot', args: out });
+      }
+      [question, opts, age, nat, wit, quorum, closes].forEach(function (n) { n.addEventListener('input', emit); });
+
+      var row1 = el('div', undefined, 'row');
+      row1.append(field('Minimum age', age), field('Nationality', nat, 'Three-letter codes. Blank admits any valid passport.'));
+      var row2 = el('div', undefined, 'row');
+      row2.append(field('How many must agree', quorum), field('Ask them to close at', closes));
+      app.replaceChildren(el('h1', 'Secret ballot — new'),
+        field('Question', question),
+        field('Options', opts, 'One per line, at least two.'),
+        row1,
+        field('Witnesses', wit, 'One per line: a Souspli address, then a name. They decide which votes were in time, so choose people the voters trust — and more than one.'),
+        row2);
+      emit();
+    }
+
+    if (a.mode === 'edit') editMode(); else viewMode();
+  </script>
+</body>
+</html>

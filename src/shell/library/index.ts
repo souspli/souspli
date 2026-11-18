@@ -669,6 +669,16 @@ export class Library {
       -- VERSION of a roster -- being in version 1 of a group you were removed
       -- from in version 2 is not membership, and the query resolves to the
       -- latest version of each chain for exactly that reason.
+      -- What the shell made of a credential letter's proofs (credential/). A
+      -- verdict is about immutable bytes checked against this build's pinned
+      -- keys, and costs a process and a second to reach, so it is kept. Only
+      -- settled verdicts are stored; "could not be checked" is asked again.
+      CREATE TABLE IF NOT EXISTS credential_verdicts (
+        envelope_hash TEXT PRIMARY KEY,
+        verdict       TEXT NOT NULL,
+        checked_at    INTEGER NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS group_members (
         envelope_hash TEXT NOT NULL,
         idx           INTEGER NOT NULL,
@@ -1831,6 +1841,18 @@ export class Library {
       .prepare('SELECT scheme, key, role, name FROM group_members WHERE envelope_hash = ? ORDER BY idx ASC')
       .all(envelopeHash) as { scheme: string; key: string; role: string; name: string }[]
     return rows.map((r) => ({ scheme: r.scheme, key: r.key, role: r.role, name: r.name }))
+  }
+
+  /** The stored verdict on a credential letter, as JSON, or null if none is settled. */
+  credentialVerdict(envelopeHash: string): string | null {
+    const r = this.db.prepare('SELECT verdict FROM credential_verdicts WHERE envelope_hash = ?').get(envelopeHash) as { verdict: string } | undefined
+    return r?.verdict ?? null
+  }
+
+  setCredentialVerdict(envelopeHash: string, verdict: string, now: number): void {
+    this.db
+      .prepare('INSERT OR REPLACE INTO credential_verdicts (envelope_hash, verdict, checked_at) VALUES (?, ?, ?)')
+      .run(envelopeHash, verdict, now)
   }
 
   /** Groups whose CURRENT version lists this key.

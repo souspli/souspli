@@ -120,3 +120,73 @@ A chain is `(author key, path)`. Amending someone else's letter therefore yields
 *your* line rooted on theirs — never a new version of theirs. For groups and other
 chained letters, readers resolve membership and content against the **latest**
 version they hold.
+
+## Credentials
+
+Evidence a letter carries in `args`, which a reader may check and report beside the
+signature. None of it is part of the format, and none of it changes whether a
+letter is admitted. A verdict on it is the reader's own and is about **the data and
+the author key**, never about which program the letter names.
+
+**Passport reading** — type `passport`:
+
+```
+args: { dg1, sod, dg15?, aaResponse? }        base64 text
+```
+
+`dg1` and `sod` are EF.DG1 and EF.SOD as the chip returns them. The reader checks
+ICAO 9303 passive authentication against state certificates it holds itself. When
+`dg15` and `aaResponse` are present, the response must be the chip's Active
+Authentication signature over
+
+```
+SHA-256("souspli-passport-bind-v1:" || author address)[0..8]
+```
+
+for an `eth-eip191` author. Present and wrong makes the whole reading invalid.
+
+**Passport proof** — type `passport-proof`:
+
+```
+args: { format: "souspli-passport-proof/1", address, scope, subscope,
+        claims: { minAge?, nationalityIn? },
+        proofs: [ { name, circuit, publicInputs: ["0x…"], proof (base64) } ] }
+```
+
+A chain of zkPassport UltraHonk proofs named `dsc`, `id_data`, `integrity`, the
+claims (`age`, `nationality`) and `bind`. A reader verifies each under **its own**
+verification key for the named circuit, checks that each continues the last, that
+the chain starts from a certificate registry root it accepts, that the claims and
+`address` are exactly what the proofs commit to, and that `address` is the author.
+`scope` and `subscope` are text; the proofs carry their hashes, and with them a
+nullifier that is constant for one passport within one scope.
+
+**A group that admits by proof** states, in its args:
+
+```
+requires: "passport age>=18 nationality=CAN,USA"
+```
+
+`passport`, then optionally `age>=N` and `nationality=` a comma-separated list, in
+that order or either alone. Its members are the authors of valid `passport-proof`
+letters with `inGroup` naming the group, `scope` equal to
+`souspli:group:<root hash>`, an empty `subscope`, and claims at least as strong as
+the rule. One nullifier is one member: the latest `created` wins, the lower envelope
+hash breaking a tie. A reader that cannot parse `requires` MUST treat the group as
+admitting nobody.
+
+**A secret ballot** is three types:
+
+| Type | args | Signed by |
+|---|---|---|
+| `ballot` | `question`, `options[]`, `requires` (as above), `witnesses[{key, scheme, name}]`, `quorum`, `closes` | its author |
+| `ballot-vote` | `votesOn: <ballot>`, `choice` (an index), and a proof package as above | a one-time key, to which the proofs are bound |
+| `ballot-close` | `attests: <ballot>`, `votes`: vote hashes, 64 hex each, sorted, concatenated | a witness |
+
+A vote is valid when its proofs verify, meet `requires`, and carry the scope
+`souspli:ballot:<ballot hash>`. A ballot is **closed** when at least `quorum` of its
+named witnesses have published a `ballot-close` (each witness's latest counts).
+Open, a reader counts every valid vote it holds; closed, only those that at least
+`quorum` closings list. Either way one nullifier counts once, by the same
+latest-then-lowest-hash rule. Closings from keys the ballot does not name are
+ignored.

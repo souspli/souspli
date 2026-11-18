@@ -31,7 +31,7 @@
  *  plus `verdict`, which qualifies a pointer the shell seeded. Spelled out here
  *  rather than imported so this module stays free of sqlite and can be unit
  *  tested; library/index.ts refuses to load if INDEXED_RELS outgrows it. */
-export const SHELL_PINNED_KEYS: readonly string[] = ['replyTo', 'attests', 'votesOn', 'inGroup', 'verdict']
+export const SHELL_PINNED_KEYS: readonly string[] = ['replyTo', 'attests', 'votesOn', 'inGroup', 'verdict', 'requires']
 
 export type Pins = Record<string, string>
 

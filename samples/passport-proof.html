@@ -1,0 +1,141 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>passport proof</title>
+<style>
+  body { margin: 0; font: 15px/1.5 system-ui, sans-serif; background: #1d2320; color: #222;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh;
+         padding: 24px; box-sizing: border-box; }
+  .page { background: #f7f5ee; width: 34em; max-width: 100%; border-radius: 8px; padding: 24px 28px;
+          box-sizing: border-box; box-shadow: 0 12px 32px rgba(0, 0, 0, .5); }
+  h1 { margin: 0 0 12px; font-size: 13px; letter-spacing: .22em; text-transform: uppercase; color: #1f4e79; }
+  ul { margin: 0; padding: 0; list-style: none; }
+  li { padding: 8px 0; border-top: 1px solid #e2decf; font-size: 17px; font-weight: 600; }
+  li:first-child { border-top: 0; }
+  .field { margin-top: 12px; }
+  .field .k { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #6b6b6b; }
+  .field .v { font-size: 13px; overflow-wrap: anywhere; font-family: ui-monospace, monospace; }
+  .note { margin-top: 16px; padding-top: 12px; border-top: 1px solid #d8d4c6; font-size: 13px; color: #555; }
+  .err { color: #a12622; font-size: 13px; margin-top: 8px; }
+  input[type=file] { font: inherit; margin-top: 8px; max-width: 100%; }
+</style>
+</head>
+<body>
+  <div class="page"><div id="app"></div></div>
+  <script>
+    'use strict';
+    // State: args { format, address, scope, subscope, claims { minAge, nationalityIn }, proofs [...] }
+    // -- a proof package as nfcid's zk/package.sh writes it: zero-knowledge
+    // proofs that SOME passport satisfies `claims` and is bound to `address`,
+    // without the passport.
+    //
+    // This program shows what the letter CLAIMS was proved. It cannot check a
+    // proof (no WebAssembly in here, by design) and cannot see who signed the
+    // letter, so it cannot tell whether `address` is the author. Souspli checks
+    // every proof against its own keys and the author's key, and the header
+    // states what held. So: no tick anywhere below.
+    var FORMAT = 'souspli-passport-proof/1';
+    var a = window.bridge.getArgs() || {};
+    var args = (a && typeof a.args === 'object' && a.args !== null) ? a.args : {};
+    var app = document.getElementById('app');
+
+    function str(v) { return typeof v === 'string' ? v : ''; }
+    function el(tag, text, cls) {
+      var e = document.createElement(tag);
+      if (text !== undefined) e.textContent = text;
+      if (cls) e.className = cls;
+      return e;
+    }
+    function field(label, value) {
+      var f = el('div', undefined, 'field');
+      f.append(el('div', label, 'k'), el('div', value || '—', 'v'));
+      return f;
+    }
+
+    // The claims as sentences. Only well-formed values are shown at all.
+    function claimLines(data) {
+      var c = data && typeof data.claims === 'object' && data.claims ? data.claims : {};
+      var lines = [];
+      if (typeof c.minAge === 'number' && c.minAge > 0 && c.minAge < 150 && Math.floor(c.minAge) === c.minAge) {
+        lines.push('Aged ' + c.minAge + ' or over');
+      }
+      if (Array.isArray(c.nationalityIn) && c.nationalityIn.length > 0) {
+        var list = c.nationalityIn.filter(function (x) { return /^[A-Z]{3}$/.test(str(x)); });
+        if (list.length === 1) lines.push('A citizen of ' + list[0]);
+        else if (list.length > 1) lines.push('A citizen of one of: ' + list.join(', '));
+      }
+      return lines;
+    }
+
+    function summary(data) {
+      var frag = document.createDocumentFragment();
+      frag.append(el('h1', 'Passport proof'));
+      if (str(data.format) !== FORMAT || !Array.isArray(data.proofs)) {
+        frag.append(el('p', 'No proofs yet.'));
+        return frag;
+      }
+      var lines = claimLines(data);
+      var intro = el('p', 'This letter claims to prove, about the holder of a passport:'); intro.id = 'view-intro';
+      var list = el('ul'); list.id = 'view-claims';
+      (lines.length ? lines : ['That they hold a valid passport']).forEach(function (t) { list.append(el('li', t)); });
+      frag.append(intro, list, field('Bound to the key', str(data.address)), field('Scope', str(data.scope) + (str(data.subscope) ? ' / ' + str(data.subscope) : '')));
+      return frag;
+    }
+
+    function viewMode() {
+      app.replaceChildren(summary(args));
+      var note = el('div', undefined, 'note'); note.id = 'view-note';
+      note.textContent = 'This page shows what the letter claims. Whether the proofs hold, and whether they are bound to the ' +
+        'key that signed this letter, is checked by Souspli and stated in the header above — not here. Nothing else about ' +
+        'the passport is in this letter: no name, no number, no date of birth.';
+      app.append(note);
+    }
+
+    function editMode() {
+      var current = str(args.format) === FORMAT ? args : null;
+      var error = el('div', undefined, 'err'); error.id = 'edit-error';
+      var preview = el('div');
+      var status = el('div', undefined, 'note');
+
+      function emit() {
+        // Whole-set replacement: every field of the package, every time.
+        var out = current ? { format: current.format, address: current.address, scope: current.scope,
+          subscope: str(current.subscope), claims: current.claims || {}, proofs: current.proofs } : {};
+        window.bridge.emit('draft', { type: 'passport-proof', args: out });
+      }
+      function render() {
+        preview.replaceChildren(current ? summary(current) : document.createDocumentFragment());
+        status.textContent = current
+          ? 'Publish from the identity with the address above. Under any other key, Souspli will report that the check failed: ' +
+            'the proofs are bound to that one address.'
+          : '';
+      }
+      function load(text) {
+        var pkg;
+        try { pkg = JSON.parse(text); } catch (e) { error.textContent = 'That file is not a proof package (not JSON).'; return; }
+        if (!pkg || str(pkg.format) !== FORMAT || !Array.isArray(pkg.proofs) || !/^0x[0-9a-f]{40}$/.test(str(pkg.address))) {
+          error.textContent = 'That file is not a Souspli passport proof package.'; return;
+        }
+        error.textContent = '';
+        current = pkg;
+        render(); emit();
+      }
+
+      var pick = el('input'); pick.type = 'file'; pick.accept = '.json,application/json'; pick.id = 'edit-file';
+      pick.addEventListener('change', function () {
+        var f = pick.files && pick.files[0];
+        if (!f) return;
+        if (f.size > 240 * 1024) { error.textContent = 'That file is too large to be a proof package.'; return; }
+        f.text().then(load);
+      });
+      var intro = el('div', 'Choose a proof package made from your passport reading (zk/package.sh in the NFC ID tools), bound to your Souspli address.');
+      app.replaceChildren(el('h1', 'Passport proof — new'), intro, pick, error, preview, status);
+      render();
+      emit(); // initial state, so the header's Publish reflects what is held
+    }
+
+    if (a.mode === 'edit') editMode(); else viewMode();
+  </script>
+</body>
+</html>

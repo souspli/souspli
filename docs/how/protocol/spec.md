@@ -292,6 +292,15 @@ uninteresting but because they bind content to a legal identity, which is close
 to the opposite of what this system is for. The registry has a slot when that
 changes.
 
+That remains so: no letter is *signed* by a passport. What exists instead is
+evidence a letter may **carry in its `args`** — a chip reading, or zero-knowledge
+proofs about one — which a client may check and report beside the signature.
+Such evidence is a convention between letters, like the relations, not part of
+this format: an implementation that ignores it still admits every such letter,
+and loses only what its header could have said. The conventions are in
+[relations](relations.md#credentials), and the reasoning in the
+[credentials design note](../../design-notes/credentials.md).
+
 ---
 
 ## 7. Sealed envelopes (private things)

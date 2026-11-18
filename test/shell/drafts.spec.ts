@@ -96,6 +96,11 @@ test('the built app ships the starter programs', async () => {
       'contract',
       'vote',
       'join-request',
+      'passport',
+      'passport-proof',
+      'ballot',
+      'ballot-vote',
+      'ballot-close',
       'vouch',
       'poster'
     ])

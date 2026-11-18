@@ -14,6 +14,7 @@ page rather than hidden.
 | Sign a document together, amend it, vouch for its accuracy | [Contracts, versions, attestations](contracts.md) |
 | See what kinds of letter are built in | [Types](types.md) |
 | Decide whose opinion counts | [People, vouches and your tribe](people.md) |
+| Prove something from a passport, gate a forum on it, or hold a secret ballot | [Passports](passport.md) |
 | Understand your key and back it up | [Identity and keys](identity.md) |
 | Know exactly what each action reveals, and to whom | [What leaks when](privacy.md) |
 | Run more than one identity, or use it from a terminal | [From a terminal](install.md#from-a-terminal) |
