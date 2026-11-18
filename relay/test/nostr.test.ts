@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { schnorr } from '@noble/curves/secp256k1.js'
-import { eventId, matches, parseFilter, policyError, shapeError, verifyEvent, THING_KIND, type NostrEvent, type Policy } from '../src/nostr'
+import { eventId, keySet, matches, parseFilter, policyError, rateLimited, shapeError, verifyEvent, THING_KIND, type NostrEvent, type Policy } from '../src/nostr'
 
 const hex = (b: Uint8Array): string => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('')
 const unhex = (s: string): Uint8Array => Uint8Array.from(s.match(/../g) ?? [], (h) => parseInt(h, 16))
@@ -8,7 +8,7 @@ const priv = schnorr.utils.randomSecretKey()
 const H = 'ab'.repeat(32)
 const NOW = 1_800_000_000
 
-const policy: Policy = { maxContentBytes: 100, blockedPubkeys: new Set(), maxFutureSeconds: 3600 }
+const policy: Policy = { maxContentBytes: 100, blockedPubkeys: new Set(), trustedPubkeys: new Set(), maxFutureSeconds: 3600 }
 
 function sign(partial: Partial<NostrEvent> = {}): NostrEvent {
   const base = {
@@ -86,6 +86,18 @@ describe('what this relay takes', () => {
   it('not from a key the operator has blocked', () => {
     const ev = sign()
     expect(policyError(ev, { ...policy, blockedPubkeys: new Set([ev.pubkey]) }, NOW)).toMatch(/may not post/)
+  })
+  it('a trusted key skips the hourly limits and nothing else', () => {
+    const ev = sign()
+    expect(rateLimited(ev, policy)).toBe(true)
+    const trusting = { ...policy, trustedPubkeys: keySet(` ${ev.pubkey.toUpperCase()} , ff `) }
+    expect(rateLimited(ev, trusting)).toBe(false)
+    expect(rateLimited({ ...ev, pubkey: 'ab'.repeat(32) }, trusting)).toBe(true) // a different key still is
+    // still bound by everything else
+    expect(policyError(sign({ content: 'x'.repeat(101) }), trusting, NOW)).toMatch(/content over/)
+    // and blocking wins over trust
+    expect(rateLimited(ev, { ...trusting, blockedPubkeys: new Set([ev.pubkey]) })).toBe(true)
+    expect(keySet(undefined).size).toBe(0)
   })
 })
 

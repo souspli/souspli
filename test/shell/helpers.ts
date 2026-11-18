@@ -206,6 +206,10 @@ export interface ShellHandle {
    *  that fetches one. Nothing follows a pointer on its own. */
   offers(inGroup?: string): Promise<Record<string, unknown>[]>
   fetchOffer(envelopeHash: string): Promise<Record<string, unknown>>
+  /** Subscriptions: consent to fetch one author's pointers as they arrive. */
+  subscribe(scheme: string, key: string, feeds: string[] | null): Promise<Record<string, unknown>>
+  unsubscribe(scheme: string, key: string): Promise<Record<string, unknown>>
+  subscriptions(): Promise<Record<string, unknown>[]>
   /** Votes: cast one, and read what the votes on a thing are worth. */
   vote(envelopeHash: string, dir: 1 | -1): Promise<Record<string, unknown>>
   votes(envelopeHash: string): Promise<Record<string, number>>
@@ -591,6 +595,31 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
         ).__shell
         return s.fetchOffer(h)
       }, envelopeHash),
+    subscribe: (scheme: string, key: string, feeds: string[] | null) =>
+      app.evaluate(
+        async (electron, a) => {
+          const s = (
+            electron.app as unknown as {
+              __shell: { subscribe: (s: string, k: string, f: string[] | null) => Promise<Record<string, unknown>> }
+            }
+          ).__shell
+          return s.subscribe(a.scheme, a.key, a.feeds)
+        },
+        { scheme, key, feeds }
+      ),
+    unsubscribe: (scheme: string, key: string) =>
+      app.evaluate(
+        async (electron, a) => {
+          const s = (electron.app as unknown as { __shell: { unsubscribe: (s: string, k: string) => Record<string, unknown> } }).__shell
+          return s.unsubscribe(a.scheme, a.key) as never
+        },
+        { scheme, key }
+      ),
+    subscriptions: () =>
+      app.evaluate(async (electron) => {
+        const s = (electron.app as unknown as { __shell: { subscriptions: () => Record<string, unknown>[] } }).__shell
+        return s.subscriptions() as never
+      }),
     vote: (envelopeHash: string, dir: 1 | -1) =>
       app.evaluate(
         async (electron, a) => {

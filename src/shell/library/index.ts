@@ -81,6 +81,34 @@ export interface OfferRow {
   reason: string
   transferId: string | null
   seenAt: number
+  /** The event's `thing-feed` tag: which of a publisher's feeds this is. A hint. */
+  feed: string | null
+  /** Set when a subscription fetched this rather than a press: the author the
+   *  letter must turn out to be signed by, or it is refused. */
+  owedAuthor: { scheme: string; key: string } | null
+}
+
+/** Consent, given once, to fetch what one author posts.
+ *
+ *  An offer is never followed on a stranger's say-so: that is the rule the
+ *  Fetch button enforces. A subscription moves the press to here. The human
+ *  names an AUTHOR (a signing key they hold public letters from), and the
+ *  relay key that author bound to those letters (Author.ek) comes with it.
+ *  Pointers posted under that relay key are fetched as they arrive, and what
+ *  comes back must be signed by that author or it is refused. Nobody else's
+ *  pointer, and no other author's letter, gets in this way. */
+export interface SubscriptionRow {
+  authorScheme: string
+  authorKey: string
+  /** The nostr key whose pointers are fetched: learned from the author's own public letter. */
+  ek: string
+  /** Which `thing-feed` values to fetch; null = all of them. */
+  feeds: string[] | null
+  /** Refuse anything bigger, checked as soon as the size is known. */
+  maxBytes: number
+  /** At most this many automatic fetches an hour. */
+  perHour: number
+  createdAt: number
 }
 
 type OfferDbRow = {
@@ -95,6 +123,9 @@ type OfferDbRow = {
   reason: string
   transfer_id: string | null
   seen_at: number
+  feed?: string | null
+  owed_scheme?: string | null
+  owed_key?: string | null
 }
 
 const toOfferRow = (r: OfferDbRow): OfferRow => ({
@@ -108,8 +139,36 @@ const toOfferRow = (r: OfferDbRow): OfferRow => ({
   state: r.state === 'fetching' || r.state === 'failed' ? r.state : 'offered',
   reason: r.reason,
   transferId: r.transfer_id,
-  seenAt: r.seen_at
+  seenAt: r.seen_at,
+  feed: r.feed ?? null,
+  owedAuthor: r.owed_scheme && r.owed_key ? { scheme: r.owed_scheme, key: r.owed_key } : null
 })
+
+type SubscriptionDbRow = {
+  author_scheme: string
+  author_key: string
+  ek: string
+  feeds: string | null
+  max_bytes: number
+  per_hour: number
+  created_at: number
+}
+
+function toSubscription(r: SubscriptionDbRow): SubscriptionRow {
+  let feeds: string[] | null = null
+  if (r.feeds !== null) {
+    try {
+      const v = JSON.parse(r.feeds) as unknown
+      feeds = Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : null
+    } catch {
+      feeds = [] // unreadable: fetch nothing rather than everything
+    }
+  }
+  return { authorScheme: r.author_scheme, authorKey: r.author_key, ek: r.ek, feeds, maxBytes: r.max_bytes, perHour: r.per_hour, createdAt: r.created_at }
+}
+
+/** Every offers read goes through this, so the extra columns come along. */
+const OFFERS = `SELECT o.*, x.feed, x.owed_scheme, x.owed_key FROM offers o LEFT JOIN offer_extra x ON x.envelope_hash = o.envelope_hash`
 
 export interface FeedQuery {
   type?: string
@@ -695,6 +754,45 @@ export class Library {
       );
 
       CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+
+      -- Consent to fetch one author's pointers as they arrive (SubscriptionRow).
+      -- feeds is a JSON array of thing-feed values, or NULL for all.
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        author_scheme TEXT NOT NULL,
+        author_key    TEXT NOT NULL,
+        ek            TEXT NOT NULL,
+        feeds         TEXT,
+        max_bytes     INTEGER NOT NULL,
+        per_hour      INTEGER NOT NULL,
+        created_at    INTEGER NOT NULL,
+        PRIMARY KEY (author_scheme, author_key)
+      );
+      CREATE INDEX IF NOT EXISTS idx_subscriptions_ek ON subscriptions(ek);
+      -- When each automatic fetch started, for the hourly cap. Pruned as it grows.
+      CREATE TABLE IF NOT EXISTS auto_fetches (
+        author_scheme TEXT NOT NULL,
+        author_key    TEXT NOT NULL,
+        at            INTEGER NOT NULL
+      );
+      -- What an offer carries beyond its offers row. A new table rather than
+      -- columns: migrate() is CREATE-IF-NOT-EXISTS, which cannot add a column
+      -- to a table an older version already made.
+      CREATE TABLE IF NOT EXISTS offer_extra (
+        envelope_hash TEXT PRIMARY KEY,
+        feed          TEXT,
+        owed_scheme   TEXT,
+        owed_key      TEXT,
+        auto_at       INTEGER
+      );
+      -- Feed names each relay key has used, kept after its offers are fetched
+      -- or dropped, so a Subscribe dialog can still offer the choice. Bounded
+      -- per poster in recordOffer.
+      CREATE TABLE IF NOT EXISTS poster_feeds (
+        poster    TEXT NOT NULL,
+        feed      TEXT NOT NULL,
+        last_seen INTEGER NOT NULL,
+        PRIMARY KEY (poster, feed)
+      );
     `)
     this.backfillRefs()
     this.backfillTitles()
@@ -1376,6 +1474,7 @@ export class Library {
     type: string
     inGroup: string | null
     replyTo: string | null
+    feed?: string | null
     now: number
   }): boolean {
     if (this.get(o.envelopeHash)) return false
@@ -1392,6 +1491,21 @@ export class Library {
            state = 'offered', reason = '', transfer_id = NULL, seen_at = excluded.seen_at`
       )
       .run(o.envelopeHash, o.locator, o.relayUrl, o.poster, o.type, o.inGroup, o.replyTo, o.now)
+    // A fresh advertisement owes nobody anything yet: whether it is fetched
+    // automatically is decided after, by the caller, against subscriptions.
+    this.db
+      .prepare('INSERT OR REPLACE INTO offer_extra (envelope_hash, feed, owed_scheme, owed_key, auto_at) VALUES (?,?,NULL,NULL,NULL)')
+      .run(o.envelopeHash, o.feed ?? null)
+    if (o.feed) {
+      this.db.prepare('INSERT OR REPLACE INTO poster_feeds (poster, feed, last_seen) VALUES (?,?,?)').run(o.poster, o.feed, o.now)
+      // A poster can name feeds forever; keep its newest few dozen.
+      this.db
+        .prepare(
+          `DELETE FROM poster_feeds WHERE poster = ? AND feed NOT IN (
+             SELECT feed FROM poster_feeds WHERE poster = ? ORDER BY last_seen DESC LIMIT 64)`
+        )
+        .run(o.poster, o.poster)
+    }
     this.db
       .prepare(
         `DELETE FROM offers WHERE envelope_hash NOT IN (
@@ -1399,11 +1513,12 @@ export class Library {
          )`
       )
       .run(this.maxOffers)
+    this.db.prepare('DELETE FROM offer_extra WHERE envelope_hash NOT IN (SELECT envelope_hash FROM offers)').run()
     return true
   }
 
   offer(envelopeHash: string): OfferRow | null {
-    const r = this.db.prepare('SELECT * FROM offers WHERE envelope_hash = ?').get(envelopeHash) as
+    const r = this.db.prepare(`${OFFERS} WHERE o.envelope_hash = ?`).get(envelopeHash) as
       | OfferDbRow
       | undefined
     return r ? toOfferRow(r) : null
@@ -1413,10 +1528,10 @@ export class Library {
   offers(query: { inGroup?: string; limit?: number } = {}): OfferRow[] {
     const rows = query.inGroup
       ? (this.db
-          .prepare('SELECT * FROM offers WHERE in_group = ? ORDER BY seen_at DESC LIMIT ?')
+          .prepare(`${OFFERS} WHERE o.in_group = ? ORDER BY o.seen_at DESC LIMIT ?`)
           .all(query.inGroup, query.limit ?? 200) as OfferDbRow[])
       : (this.db
-          .prepare('SELECT * FROM offers ORDER BY seen_at DESC LIMIT ?')
+          .prepare(`${OFFERS} ORDER BY o.seen_at DESC LIMIT ?`)
           .all(query.limit ?? 200) as OfferDbRow[])
     return rows.map(toOfferRow)
   }
@@ -1431,14 +1546,93 @@ export class Library {
    *  which is the point: a magnet resumed on the next launch still has to
    *  deliver the thing it was started for. */
   offerForTransfer(transferId: string): OfferRow | null {
-    const r = this.db.prepare('SELECT * FROM offers WHERE transfer_id = ?').get(transferId) as
+    const r = this.db.prepare(`${OFFERS} WHERE o.transfer_id = ?`).get(transferId) as
       | OfferDbRow
       | undefined
     return r ? toOfferRow(r) : null
   }
 
   dropOffer(envelopeHash: string): boolean {
+    this.db.prepare('DELETE FROM offer_extra WHERE envelope_hash = ?').run(envelopeHash)
     return this.db.prepare('DELETE FROM offers WHERE envelope_hash = ?').run(envelopeHash).changes > 0
+  }
+
+  // ── Subscriptions ──────────────────────────────────────────────────────────
+
+  subscribe(sub: Omit<SubscriptionRow, 'createdAt'>, now: number): void {
+    this.db
+      .prepare(
+        `INSERT INTO subscriptions (author_scheme, author_key, ek, feeds, max_bytes, per_hour, created_at)
+         VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(author_scheme, author_key) DO UPDATE SET
+           ek = excluded.ek, feeds = excluded.feeds, max_bytes = excluded.max_bytes, per_hour = excluded.per_hour`
+      )
+      .run(sub.authorScheme, sub.authorKey, sub.ek, sub.feeds ? JSON.stringify(sub.feeds) : null, sub.maxBytes, sub.perHour, now)
+  }
+
+  unsubscribe(scheme: string, key: string): boolean {
+    this.db.prepare('DELETE FROM auto_fetches WHERE author_scheme = ? AND author_key = ?').run(scheme, key)
+    return this.db.prepare('DELETE FROM subscriptions WHERE author_scheme = ? AND author_key = ?').run(scheme, key).changes > 0
+  }
+
+  subscriptions(): SubscriptionRow[] {
+    return (this.db.prepare('SELECT * FROM subscriptions ORDER BY created_at ASC').all() as SubscriptionDbRow[]).map(toSubscription)
+  }
+
+  subscription(scheme: string, key: string): SubscriptionRow | null {
+    const r = this.db.prepare('SELECT * FROM subscriptions WHERE author_scheme = ? AND author_key = ?').get(scheme, key) as
+      | SubscriptionDbRow
+      | undefined
+    return r ? toSubscription(r) : null
+  }
+
+  /** The subscription whose relay key posted an event, if any. */
+  subscriptionForPoster(ek: string): SubscriptionRow | null {
+    const r = this.db.prepare('SELECT * FROM subscriptions WHERE ek = ? LIMIT 1').get(ek) as SubscriptionDbRow | undefined
+    return r ? toSubscription(r) : null
+  }
+
+  /** Offers waiting to be fetched that this poster advertised, newest first. */
+  offeredBy(poster: string, limit: number): OfferRow[] {
+    return (
+      this.db.prepare(`${OFFERS} WHERE o.poster = ? AND o.state = 'offered' ORDER BY o.seen_at DESC LIMIT ?`).all(poster, limit) as OfferDbRow[]
+    ).map(toOfferRow)
+  }
+
+  /** The feed names a poster's pointers have carried, for choosing among them. */
+  feedsOfferedBy(poster: string): string[] {
+    return (this.db.prepare('SELECT feed FROM poster_feeds WHERE poster = ? ORDER BY feed').all(poster) as { feed: string }[]).map(
+      (r) => r.feed
+    )
+  }
+
+  /** Automatic fetches still running that started after `since` (older ones
+   *  are presumed stalled and no longer hold a slot). */
+  autoFetching(since: number): number {
+    return (
+      this.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM offers o JOIN offer_extra x ON x.envelope_hash = o.envelope_hash
+            WHERE o.state = 'fetching' AND x.owed_key IS NOT NULL AND x.auto_at >= ?`
+        )
+        .get(since) as { n: number }
+    ).n
+  }
+
+  /** Mark an offer as fetched on a subscription's behalf, and count it against the hour. */
+  noteAutoFetch(envelopeHash: string, scheme: string, key: string, now: number): void {
+    this.db.prepare('INSERT OR IGNORE INTO offer_extra (envelope_hash) VALUES (?)').run(envelopeHash)
+    this.db.prepare('UPDATE offer_extra SET owed_scheme = ?, owed_key = ?, auto_at = ? WHERE envelope_hash = ?').run(scheme, key, now, envelopeHash)
+    this.db.prepare('INSERT INTO auto_fetches (author_scheme, author_key, at) VALUES (?,?,?)').run(scheme, key, now)
+    this.db.prepare('DELETE FROM auto_fetches WHERE at < ?').run(now - 3_600_000)
+  }
+
+  autoFetchesSince(scheme: string, key: string, since: number): number {
+    return (
+      this.db.prepare('SELECT COUNT(*) AS n FROM auto_fetches WHERE author_scheme = ? AND author_key = ? AND at >= ?').get(scheme, key, since) as {
+        n: number
+      }
+    ).n
   }
 
   // ── Relays ─────────────────────────────────────────────────────────────────

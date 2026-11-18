@@ -22,9 +22,38 @@
     "MAX_CONTENT_BYTES": "45056",   // base64 of the app's 32 KiB inline cap, with headroom
     "EVENTS_PER_PUBKEY_PER_HOUR": "60",
     "EVENTS_PER_IP_PER_HOUR": "120",
-    "BLOCKED_PUBKEYS": ""           // comma-separated hex x-only keys
+    "BLOCKED_PUBKEYS": "",          // comma-separated hex x-only keys
+    "TRUSTED_PUBKEYS": ""           // keys exempt from the hourly limits (a publishing bot's)
   },
   // Off on purpose: request logs would record who connected and from where, and
   // the relay deliberately keeps neither.
-  "observability": { "enabled": false }
+  "observability": { "enabled": false },
+
+  // A second deployment, for news: the relay a publishing bot (newsread)
+  // announces articles on and reads sealed subscribe letters from. Same code,
+  // its own Worker (souspli-relay-news), its own Durable Object and storage,
+  // its own limits. Deploy with: npm run deploy -- --env news
+  //
+  // Bindings and vars are not inherited by an environment, so everything is
+  // restated here. Change the route to the domain you want readers to add.
+  "env": {
+    "news": {
+      "routes": [{ "pattern": "news-relay.souspli.org", "custom_domain": true }],
+      "durable_objects": {
+        "bindings": [{ "name": "RELAY", "class_name": "Relay" }]
+      },
+      "vars": {
+        "RELAY_NAME": "the Souspli news relay",
+        "MAX_EVENTS": "50000",
+        "MAX_CONTENT_BYTES": "45056",
+        // Readers' own posts here are subscribe letters: a handful each.
+        "EVENTS_PER_PUBKEY_PER_HOUR": "60",
+        "EVENTS_PER_IP_PER_HOUR": "120",
+        "BLOCKED_PUBKEYS": "",
+        // The bot's relay key (`newsread relays` prints it), so a burst of
+        // articles is never refused. Comma-separated hex x-only keys.
+        "TRUSTED_PUBKEYS": ""
+      }
+    }
+  }
 }

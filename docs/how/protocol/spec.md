@@ -595,6 +595,6 @@ should absorb; none is a workaround in the code. Background:
 | §6 `eth-eip191` | Sign and verify. The only scheme the Souspli app signs letters with. |
 | §6 `nostr-schnorr` | Verify. The app uses this key for relay events and unsealing, not for signing letters. |
 | §6 `ssh-ed25519` | **Not implemented** — an envelope using it is `unverifiable`. |
-| §7 sealing | `seal` / `unseal` implemented and covered by conformance vectors, including the padding rule above (`sealed.json` was regenerated when the implementation was brought into line with it on 2026-09-23; nothing sealed under the earlier draft existed outside tests). The app can open sealed bundles; it cannot yet author them. |
+| §7 sealing | `seal` / `unseal` implemented and covered by conformance vectors, including the padding rule above (`sealed.json` was regenerated when the implementation was brought into line with it on 2026-09-23; nothing sealed under the earlier draft existed outside tests). The app opens, writes and sends sealed letters (since 0.2.3). |
 | §5.3 chaining | Implemented; forks are flagged. `path` is set to the root envelope's hash when a letter is first amended. |
 | §11 vectors | 41 vectors in 7 categories, committed under `src/conformance/vectors/`. |

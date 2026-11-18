@@ -129,6 +129,19 @@ const shell = {
   /** Things a relay says exist that you do not hold, and the press that
    *  fetches one. Nothing in the shell follows a pointer on its own. */
   offers: (inGroup?: string): Promise<Record<string, unknown>[]> => ipcRenderer.invoke('shell:offers', inGroup),
+  /** Consent to fetch an author's pointers as they arrive. feeds null = all. */
+  subscribe: (scheme: string, key: string, feeds: string[] | null): Promise<{ ok?: boolean; error?: string; feeds?: string[] | null }> =>
+    ipcRenderer.invoke('shell:subscribe', scheme, key, feeds),
+  unsubscribe: (scheme: string, key: string): Promise<{ ok?: boolean; error?: string }> => ipcRenderer.invoke('shell:unsubscribe', scheme, key),
+  subscriptions: (): Promise<
+    { authorScheme: string; authorKey: string; ek: string; feeds: string[] | null; maxBytes: number; perHour: number; createdAt: number; feedsOffered: string[] }[]
+  > => ipcRenderer.invoke('shell:subscriptions'),
+  /** For the Subscribe dialog: the author's relay key, the feeds it has offered, and any subscription. */
+  subscriptionOptions: (
+    scheme: string,
+    key: string
+  ): Promise<{ ek: string | null; feedsOffered: string[]; subscription: { feeds: string[] | null } | null; error?: string }> =>
+    ipcRenderer.invoke('shell:subscription-options', scheme, key),
   fetchOffer: (envelopeHash: string): Promise<Record<string, unknown>> =>
     ipcRenderer.invoke('shell:fetch-offer', envelopeHash),
   /** Votes. A vote is about a THING; saying you know a KEY is a vouch, and

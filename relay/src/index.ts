@@ -12,10 +12,14 @@ export interface Env {
   EVENTS_PER_PUBKEY_PER_HOUR: string
   EVENTS_PER_IP_PER_HOUR: string
   BLOCKED_PUBKEYS: string
+  /** Optional: keys exempt from the hourly limits (a publishing bot's). */
+  TRUSTED_PUBKEYS?: string
+  /** Optional: the name NIP-11 gives. */
+  RELAY_NAME?: string
 }
 
 const INFO = (env: Env): Record<string, unknown> => ({
-  name: 'Souspli relay',
+  name: env.RELAY_NAME || 'Souspli relay',
   description:
     'Carries Souspli letters (kind 3400) and nothing else. It adds reach, never authority: readers verify every letter themselves, and who posted one here is not who wrote it.',
   software: 'https://github.com/souspli/souspli/tree/master/relay',
@@ -42,9 +46,11 @@ export default {
         headers: { 'content-type': 'application/nostr+json', 'access-control-allow-origin': '*' }
       })
     }
+    // Name the address this was reached at, so a second deployment (the news
+    // relay) does not tell people to add the first one.
     return new Response(
-      'This is the Souspli relay: a Nostr relay that carries Souspli letters.\n' +
-        'Add wss://relay.souspli.org under File → Relays in the app. https://souspli.org\n',
+      `This is ${env.RELAY_NAME || 'the Souspli relay'}: a Nostr relay that carries Souspli letters.\n` +
+        `Add wss://${new URL(request.url).host} under File → Relays in the app. https://souspli.org\n`,
       { headers: { 'content-type': 'text/plain; charset=utf-8' } }
     )
   }

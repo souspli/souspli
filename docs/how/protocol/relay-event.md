@@ -27,6 +27,7 @@ Kind **3400** (NIP-01 regular range: stored by relays).
     ["thing-type", "comment"],        // display hint — untrusted, like every type
     ["thing-group", "<forum root>"],  // which forum, if any
     ["thing-reply", "<hash>"],        // threading, when it is a reply
+    ["thing-feed", "<feed id>"],      // which of a publisher's feeds, if it has several
     ["thing-fetch", "magnet:…"]       // only when content is a pointer
   ]
 }
@@ -106,6 +107,8 @@ Therefore:
   no byte pulled until a person presses **Fetch**. That press is the entire security
   boundary of this path — a retry loop, a thumbnail prefetch or a "fetch all" would
   remove it.
+- **Except where the person subscribed** (see below), which moves the press to one
+  decision about one author.
 - An offer has **no author**. The event names a Nostr key; who signed the letter is
   inside an envelope that has not arrived. The honest line is "offered by `<key>`".
 - `thing-type`, `thing-group` and `thing-reply` are hints about something nobody
@@ -120,6 +123,35 @@ Therefore:
 
 An offer can be voted on and ranked like any letter — a vote points at a hash
 whether or not you hold it.
+
+## Subscriptions
+
+Some authors only ever post pointers: an article's program alone is over the inline
+cap. For them a reader may **subscribe** — consent, given once, to fetch that
+author's pointers as they arrive. The bounds are what keep it consent rather than a
+door:
+
+- **The key is the author's own.** A subscription names an author's signing key. The
+  relay key it follows is the `ek` that author bound inside one of their *public*
+  letters you already hold — never a key an event claimed.
+- **Only that key's pointers.** An event posted by any other key stays an offer.
+- **Only that author's letters.** What arrives must match `x` (as for any offer)
+  *and* be signed by the subscribed author; a validly signed letter by anyone else
+  is refused and nothing is kept.
+- **Only the chosen feeds.** A subscription may name `thing-feed` values; a pointer
+  without one, or with another, stays an offer.
+- **Bounded.** A per-subscription size cap (checked when the torrent's metadata
+  names the size), an hourly cap, a few at once, and no automatic retry of a
+  failure.
+- `file:` and `bundle:` locators are never followed this way.
+
+`thing-feed` is a hint the poster chose, like every `thing-*` tag. It decides only
+which of a subscribed author's pointers to follow — never whether something is
+admitted. A publisher with one feed can omit it.
+
+A publisher learns who wants what the same way anyone learns anything privately: a
+reader may send it a sealed memo (`subscribe <feeds>` / `unsubscribe`). That is a
+convention between the two, not part of this event.
 
 ## A relay for it
 

@@ -66,9 +66,11 @@ const eq = (got, want, what) => {
 
 // A throwaway storage dir, so every run starts from an empty room.
 const state = mkdtempSync(join(tmpdir(), 'souspli-relay-'))
+// The operator's publishing bot: exempt from the hourly limits.
+const trusted = schnorr.utils.randomSecretKey()
 const dev = spawn(
   'npx',
-  ['wrangler', 'dev', '--port', String(PORT), '--ip', '127.0.0.1', '--persist-to', state, '--var', 'EVENTS_PER_PUBKEY_PER_HOUR:4', '--var', 'MAX_EVENTS:6'],
+  ['wrangler', 'dev', '--port', String(PORT), '--ip', '127.0.0.1', '--persist-to', state, '--var', 'EVENTS_PER_PUBKEY_PER_HOUR:4', '--var', 'MAX_EVENTS:6', '--var', `TRUSTED_PUBKEYS:${hex(schnorr.getPublicKey(trusted))}`],
   // Its own process group: wrangler starts workerd as a child, and killing only
   // the parent leaves the runtime holding the port for the next run.
   { stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' } }
@@ -162,6 +164,18 @@ try {
       results.push((await c.waitFor((f) => f[0] === 'OK' && f[1] === ev.id, 'OK'))[2])
     }
     eq(results, [true, true, true, true, false, false], 'accepted / refused')
+    c.close()
+  })
+
+  await check('a TRUSTED_PUBKEYS key is not rate-limited', async () => {
+    const c = await connect()
+    const results = []
+    for (let i = 0; i < 6; i++) {
+      const ev = sign(trusted)
+      c.send(['EVENT', ev])
+      results.push((await c.waitFor((f) => f[0] === 'OK' && f[1] === ev.id, 'OK'))[2])
+    }
+    eq(results, [true, true, true, true, true, true], 'all accepted')
     c.close()
   })
 

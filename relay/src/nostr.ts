@@ -24,6 +24,9 @@ export interface NostrEvent {
 export interface Policy {
   maxContentBytes: number
   blockedPubkeys: ReadonlySet<string>
+  /** Keys the operator vouches for (a publishing bot): exempt from the hourly
+   *  rate limits, and not counted against the address they post from. */
+  trustedPubkeys: ReadonlySet<string>
   /** Seconds a created_at may lie in the future. Clients clamp cursors on it. */
   maxFutureSeconds: number
 }
@@ -71,6 +74,18 @@ export function shapeError(raw: unknown): string | null {
  *  good is the reader's admission gate's business, and a relay that claimed to
  *  have checked would be inviting clients to trust it. It adds reach, never
  *  authority. What it does bound is what it costs to be offered junk. */
+/** Whether the hourly limits apply to this event. Everything else — shape,
+ *  kind, size, signature, blocking — applies to a trusted key exactly as to
+ *  anyone. A blocked key is never exempt. */
+export function rateLimited(ev: NostrEvent, policy: Policy): boolean {
+  return policy.blockedPubkeys.has(ev.pubkey) || !policy.trustedPubkeys.has(ev.pubkey)
+}
+
+/** A comma-separated list of hex keys, as the operator types it into a var. */
+export function keySet(list: string | undefined): Set<string> {
+  return new Set((list ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))
+}
+
 export function policyError(ev: NostrEvent, policy: Policy, nowSeconds: number): string | null {
   if (ev.kind !== THING_KIND) return `blocked: this relay carries Souspli letters (kind ${THING_KIND}) only`
   if (policy.blockedPubkeys.has(ev.pubkey)) return 'blocked: this key may not post here'
