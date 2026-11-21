@@ -81,6 +81,10 @@ test('a proof that meets the rule admits its key: its posts and votes count, a s
   await expect.poll(async () => (await facts()).provenMembers, { timeout: 30_000 }).toBe(1)
   expect(await listed()).toEqual(['from alice'])
   expect(await ups(p)).toBe(1)
+  // The list of forums counts what the forum shows: not the proof, the votes
+  // or a stranger's post.
+  const mine = (await shell.forums()).find((f) => f.root === root)
+  expect(mine?.posts).toBe(1)
 })
 
 test('a proof republished by someone else admits nobody', async () => {
@@ -135,4 +139,7 @@ test('starting such a forum seeds a rule the shell can read, and refuses one it 
   expect(made.id).toBeTruthy()
   const drafts = await call<{ id: string; type: string }[]>('drafts')
   expect(drafts.find((d) => d.id === made.id)?.type).toBe('group')
+  // The Group type does not show the rule, so the header does -- before signing.
+  const header = await shell.openThing(made.id as string)
+  expect(header.requires).toBe('a passport proof: aged 18 or over, a citizen of CAN')
 })

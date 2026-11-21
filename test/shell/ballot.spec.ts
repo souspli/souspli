@@ -156,6 +156,16 @@ test('a closing from a key the ballot does not name changes nothing', async () =
   expect(await settled()).toMatchObject({ closed: false, closings: 1 })
 })
 
+test('closing asks first: a closing statement is a signature, and backing out publishes nothing', async () => {
+  await chromeEval(`window.__shellChrome.openThing(${JSON.stringify(H)})`)
+  await expect.poll(() => chromeEval<boolean>(`!!document.querySelector('[data-testid="header-ballot-close"]')`), { timeout: 15_000 }).toBe(true)
+  await chromeEval(`document.querySelector('[data-testid="header-ballot-close"]').click()`)
+  await expect.poll(() => chromeEval<boolean>(`!!document.querySelector('[data-testid="danger-confirm"]')`)).toBe(true)
+  expect(await chromeEval<string>(`document.querySelector('[data-testid="danger-confirm"]').closest('.evm-modal').innerText`)).toContain('with your identity')
+  await chromeEval(`document.querySelector('[data-testid="danger-cancel"]').click()`)
+  expect(await settled()).toMatchObject({ closed: false, closings: 1, iHaveClosed: false })
+})
+
 test('the second witness closes it: the count is final, and holds only votes two witnesses listed', async () => {
   const closed = await call<{ envelopeHash?: string; listed?: number; error?: string }>('ballotClose', H)
   expect(closed.error).toBeUndefined()
