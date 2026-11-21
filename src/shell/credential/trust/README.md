@@ -10,6 +10,13 @@ The zero-knowledge proof verifier pins the same set a second way, as a certifica
 in `../pins.json`. That root is computed by the NFC ID tools (`zk/package.sh --pins`) from these
 same files with a fixed timestamp; change the files and it must be recomputed.
 
+`../pins.json` also holds what single-proof packages are checked against: the root of zkPassport's
+**circuit registry** for the circuits release named there, and the verification keys of its outer
+circuits. The NFC ID tools print these (`zk/outer-pins.sh`), and refuse to unless each key hashes
+to the value in zkPassport's own published list for that release. Moving to a newer circuits
+release means replacing all of them together; proofs made with the old release then stop
+verifying, so keep the old root and keys alongside for as long as old letters should.
+
 ## Canada
 
 Country Signing CA certificates for Canadian ePassports (`CN=csca-canada, OU=pptc, O=gc, C=CA`). These are public trust anchors for verifying Document Signer certificates (DSCs).

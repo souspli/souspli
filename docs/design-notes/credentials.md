@@ -46,6 +46,22 @@ checked under is ours. A proof's registry root must be one we hold. The claims t
 header shows are the ones the proofs were checked against, recomputed from the
 letter's plain words.
 
+**One proof, not six.** A package is zkPassport's recursive *outer* proof: the chain
+and the claims verified inside one proof of about 15 KB. That is what lets a proof
+letter, and a vote, fit in a relay event. It also moves a job: the outer circuit
+checks, inside the proof, that every inner proof was made by a circuit whose key is a
+leaf of zkPassport's circuit registry. So the app pins that registry's root (for
+circuits 0.23.0) and the three outer circuits' keys, in place of a key per signature
+algorithm, and a passport signed with any algorithm zkPassport supports can be
+proved. The keys we compile ourselves hash to the values in zkPassport's own
+published list; the packager refuses to run otherwise. Which outer circuit a letter
+needs is fixed by its claims, so a proof of less cannot sit under a letter that says
+more. The earlier format, six separate proofs, still verifies.
+
+**A vote travels without its voter.** A ballot vote is posted inline under a key made
+for that one event. The shell refuses to post one any other way: under your relay
+key it would name you, and as a pointer it would be served from your address.
+
 **Bound to the author, two ways.** A reading is bound by the chip signing a
 challenge derived from the author's address (Active Authentication signs only eight
 bytes, so the binding is 64 bits of a hash). A proof is bound by zkPassport's `bind`
@@ -86,8 +102,7 @@ neither is *cannot be checked* (a later version may be able to).
   forge one or learn who cast one.
 - **Canada only**, no revocation lists, RSA chip signatures only.
 - **The network.** A vote posted through a relay shows the relay an address.
-- **Size.** A proof package is about 100 KB, too large to travel inline on a relay.
-  zkPassport's recursive outer proof would make it one proof; not done.
+- **Proving takes about a minute** on a desktop: the outer proof is most of it.
 - **Proving happens outside the app**, with the reader's command-line tools.
 
 ## Out of scope

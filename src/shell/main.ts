@@ -33,7 +33,7 @@ import { applyPins, pinsOf, type Pins } from './library/pins.js'
 import { mountThing, type MountedThing } from './mount/index.js'
 import { TransportService, FileTransport, HttpTransport, SeedTransport } from './transport/index.js'
 import { TorrentService, displayNameOf, infoHashOf } from './torrent/index.js'
-import { NostrService, buildThingEvent, MAX_INLINE_BUNDLE, TAG, type ParsedThingEvent } from './nostr/index.js'
+import { NostrService, buildThingEvent, buildAnonymousThingEvent, MAX_INLINE_BUNDLE, TAG, type ParsedThingEvent } from './nostr/index.js'
 import { NOSTR_ENC_SCHEME, SEALED_TYPE, buildSealedEvent } from './nostr/event.js'
 import { NamingService, DirectResolver, EnsResolver, NostrResolver, type EnsClient } from './naming/index.js'
 import { createMockEnsClient } from './naming/mock-ens.js'
@@ -2133,7 +2133,10 @@ app.whenReady().then(async () => {
     if (pkg.scope !== ballotScope(hash)) return { error: `that package was made for another scope; this ballot’s is ${ballotScope(hash)}` }
     const starter = starterByKey('starter:ballot-vote')
     if (!starter) return { error: 'the ballot-vote program is missing' }
-    const args = { votesOn: hash, choice, format: pkg.format, address: pkg.address, scope: pkg.scope, subscope: pkg.subscope ?? '', claims: pkg.claims ?? {}, proofs: pkg.proofs }
+    // The package's own fields, whichever format it is: one outer proof
+    // (format 2) or the separate ones (format 1). What is not there is left out.
+    const proofFields = Object.fromEntries(['proofs', 'circuit', 'publicInputs', 'proof'].flatMap((k) => (pkg[k] === undefined ? [] : [[k, pkg[k]]])))
+    const args = { votesOn: hash, choice, format: pkg.format, address: pkg.address, scope: pkg.scope, subscope: pkg.subscope ?? '', claims: pkg.claims ?? {}, ...proofFields }
     // Later than any vote this key already cast here: the latest is the one that counts.
     const earlier = library.feed({ type: 'ballot-vote', votesOn: hash, limit: 8000 }).filter((r) => `0x${r.authorKey.toLowerCase()}` === address)
     const created = Math.max(Math.floor(Date.now() / 1000), ...earlier.map((r) => r.created + 1))
@@ -3966,6 +3969,20 @@ app.whenReady().then(async () => {
     const exported = exportThing(envelopeHash)
     if ('error' in exported) return { error: exported.error }
     const inline = exported.tar.length <= MAX_INLINE_BUNDLE
+    // A ballot vote is signed by a key that names nobody. Posting it under
+    // your own relay key would name you, and a pointer is a magnet served
+    // from your address -- so it goes inline, under a key made for the one
+    // event, or not at all. This holds for any vote you pass on, yours or not.
+    if (row.type === 'ballot-vote') {
+      if (!inline) {
+        return {
+          error: `too large to send through relays without pointing at you (${Math.ceil(exported.tar.length / 1024)} KB, the limit is ${MAX_INLINE_BUNDLE / 1024} KB) — make the proof package in the single-proof format, or pass the vote on as a file`
+        }
+      }
+      const event = await buildAnonymousThingEvent({ envelopeHash, type: row.type, bundle: exported.tar, createdAt: Math.floor(Date.now() / 1000) })
+      const sent = nostr.publish(event)
+      return { posted: sent, inline: true, anonymous: true, relays: nostr.status().length, eventId: event.id }
+    }
     // Too big to carry: the event names the thing and says where to get it.
     // A locator is only honest if we are actually serving it, so the magnet
     // comes from the seeder and a thing that is not seeded says so.

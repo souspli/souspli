@@ -82,6 +82,21 @@ not listing recipients. A letter that isn't for the reader is dropped without a
 trace: no row, no log entry, nothing in the feed. Nothing is recorded as "offered
 by" for a sealed event, because its poster is nobody.
 
+## Ballot votes
+
+A [ballot vote](relations.md) is a public letter signed by a key that names nobody.
+Posted the ordinary way, the event's `pubkey` would be the voter's relay key and
+name them after all. So a vote travels like any inline letter, with two differences:
+
+- **The event is signed by a key made for that one event**, then discarded. Posting
+  the same vote twice gives two events that share no key.
+- **It is never a pointer.** A magnet is served from the sender's address. A vote too
+  large to carry inline is not posted; single-proof packages keep it well under the
+  cap.
+
+The tags are `t`, `x` (the envelope hash) and `thing-type: ballot-vote`. A reader
+admits it like any other bundle.
+
 ## Who posted is not who wrote
 
 Every Souspli identity has a Nostr key derived from the same secret, and every

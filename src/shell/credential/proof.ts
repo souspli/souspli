@@ -27,8 +27,24 @@ import { createHash } from 'node:crypto'
 //   age, nationality, bind
 //              [commitment in, date, scope, subscope, parameter commitment,
 //               nullifier type, nullifier, OPRF key hash]
+//
+// Format 2 is the same chain wrapped in zkPassport's recursive "outer" circuit:
+// ONE proof, about 15 KB where the six are about 90, which is what lets a proof
+// letter travel through a relay. The outer circuit does inside the proof what
+// steps 1 to 3 below do outside it -- every inner proof verifies, under a key
+// that is a leaf of zkPassport's circuit registry; each continues the last; the
+// claims share one date, scope and nullifier -- and exposes what is left:
+//
+//   outer      [certificate registry root, circuit registry root, date, scope,
+//               subscope, one parameter commitment per claim and the bind,
+//               nullifier type, nullifier, OPRF key hash, verification method]
+//
+// So for format 2 the app pins the outer circuits' keys and the circuit
+// registry's root instead of a key per inner circuit, and a passport signed
+// with any algorithm zkPassport has a circuit for can be proved.
 
 export const PACKAGE_FORMAT = 'souspli-passport-proof/1'
+export const PACKAGE_FORMAT_2 = 'souspli-passport-proof/2'
 
 /** What the app pins: which circuits and which certificate registries it accepts. */
 export interface ProofPins {
@@ -38,6 +54,8 @@ export interface ProofPins {
   roots: { name: string; root: string }[]
   /** Verification key per circuit name, base64. */
   vkeys: Record<string, string>
+  /** Root of zkPassport's circuit registry that format-2 (single proof) packages must name. */
+  circuitRoot?: string
 }
 
 /** The cryptography this module needs from a proof system (bb.ts provides it). */
@@ -94,6 +112,11 @@ const COUNTRY_SLOTS = 200
 const BIND_BYTES = 509
 const BIND_TAG_USER_ADDRESS = 1
 
+/** The outer circuit wraps the three chain proofs and this many more: a number in its name. */
+const OUTER_BASE_PROOFS = 3
+/** An outer proof's public inputs besides the parameter commitments. */
+const OUTER_FIXED_INPUTS = 9
+
 interface PackagedProof {
   name: string
   circuit: string
@@ -122,10 +145,27 @@ function packBytes(bytes: Uint8Array, size = 31): bigint[] {
   return out
 }
 
-function parsePackage(pkg: unknown): { address: string; scope: string; subscope: string; minAge?: number; nationalityIn?: string[]; proofs: Map<string, PackagedProof> } {
+interface PackageHead {
+  address: string
+  scope: string
+  subscope: string
+  minAge?: number
+  nationalityIn?: string[]
+}
+
+function parseProofBytes(e: Record<string, unknown>, name: string, maxInputs: number): { publicInputs: bigint[]; rawInputs: string[]; proof: Uint8Array } {
+  if (typeof e.proof !== 'string' || e.proof.length > MAX_PROOF_BYTES * 2 || !/^[A-Za-z0-9+/]+={0,2}$/.test(e.proof)) throw new Invalid(`the ${name} proof is not base64`)
+  const inputs = e.publicInputs
+  if (!Array.isArray(inputs) || inputs.length > maxInputs || !inputs.every((v) => typeof v === 'string' && /^0x[0-9a-f]{1,64}$/.test(v))) {
+    throw new Invalid(`the ${name} proof has malformed public inputs`)
+  }
+  return { publicInputs: (inputs as string[]).map((v) => BigInt(v)), rawInputs: inputs as string[], proof: new Uint8Array(Buffer.from(e.proof, 'base64')) }
+}
+
+function parsePackage(pkg: unknown): PackageHead & ({ proofs: Map<string, PackagedProof> } | { outer: PackagedProof }) {
   if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) throw new Invalid('the letter carries no proofs')
   const p = pkg as Record<string, unknown>
-  if (p.format !== PACKAGE_FORMAT) throw new Unsupported(`proof package format ${String(p.format).slice(0, 40)}`)
+  if (p.format !== PACKAGE_FORMAT && p.format !== PACKAGE_FORMAT_2) throw new Unsupported(`proof package format ${String(p.format).slice(0, 40)}`)
   if (typeof p.address !== 'string' || !/^0x[0-9a-f]{40}$/.test(p.address)) throw new Invalid('the proofs name no address')
   if (typeof p.scope !== 'string' || p.scope.length === 0 || p.scope.length > 256) throw new Invalid('the proofs name no scope')
   if (typeof p.subscope !== 'string' || p.subscope.length > 256) throw new Invalid('bad subscope')
@@ -143,6 +183,11 @@ function parsePackage(pkg: unknown): { address: string; scope: string; subscope:
     }
     nationalityIn = list as string[]
   }
+  const head: PackageHead = { address: p.address, scope: p.scope, subscope: p.subscope, ...(minAge !== undefined ? { minAge } : {}), ...(nationalityIn ? { nationalityIn } : {}) }
+  if (p.format === PACKAGE_FORMAT_2) {
+    if (typeof p.circuit !== 'string' || !/^outer_count_\d{1,2}$/.test(p.circuit)) throw new Invalid('the proof names the wrong kind of circuit')
+    return { ...head, outer: { name: 'outer', circuit: p.circuit, ...parseProofBytes(p, 'outer', 32) } }
+  }
   if (!Array.isArray(p.proofs) || p.proofs.length > 8) throw new Invalid('the letter carries no proofs')
   const proofs = new Map<string, PackagedProof>()
   for (const raw of p.proofs as unknown[]) {
@@ -151,20 +196,55 @@ function parsePackage(pkg: unknown): { address: string; scope: string; subscope:
     const role = CIRCUIT_FOR[name]
     if (!role || proofs.has(name)) throw new Invalid('unexpected proof in the package')
     if (typeof e.circuit !== 'string' || !role.test(e.circuit)) throw new Invalid(`the ${name} proof names the wrong kind of circuit`)
-    if (typeof e.proof !== 'string' || e.proof.length > MAX_PROOF_BYTES * 2 || !/^[A-Za-z0-9+/]+={0,2}$/.test(e.proof)) throw new Invalid(`the ${name} proof is not base64`)
-    const inputs = e.publicInputs
-    if (!Array.isArray(inputs) || inputs.length > 16 || !inputs.every((v) => typeof v === 'string' && /^0x[0-9a-f]{1,64}$/.test(v))) {
-      throw new Invalid(`the ${name} proof has malformed public inputs`)
-    }
-    proofs.set(name, {
-      name,
-      circuit: e.circuit,
-      publicInputs: (inputs as string[]).map((v) => BigInt(v)),
-      rawInputs: inputs as string[],
-      proof: new Uint8Array(Buffer.from(e.proof, 'base64'))
-    })
+    proofs.set(name, { name, circuit: e.circuit, ...parseProofBytes(e, name, 16) })
   }
-  return { address: p.address, scope: p.scope, subscope: p.subscope, ...(minAge !== undefined ? { minAge } : {}), ...(nationalityIn ? { nationalityIn } : {}), proofs }
+  return { ...head, proofs }
+}
+
+/** The values the proofs must commit to for the claims a letter states, in the order
+ *  the packager proves them: age, nationality, then the bind. */
+async function expectedCommitments(head: PackageHead, backend: ProofBackend): Promise<{ name: (typeof DISCLOSURES)[number]; value: bigint }[]> {
+  const out: { name: (typeof DISCLOSURES)[number]; value: bigint }[] = []
+  if (head.minAge !== undefined) out.push({ name: 'age', value: await backend.poseidon2([TYPE_AGE, 2n, BigInt(head.minAge), 0n]) })
+  if (head.nationalityIn) {
+    const codes = head.nationalityIn.map((c) => BigInt(c.charCodeAt(0) * 65536 + c.charCodeAt(1) * 256 + c.charCodeAt(2)))
+    while (codes.length < COUNTRY_SLOTS) codes.push(0n)
+    out.push({ name: 'nationality', value: await backend.poseidon2([TYPE_NATIONALITY_INCLUSION, BigInt(COUNTRY_SLOTS), ...codes]) })
+  }
+  const bound = new Uint8Array(BIND_BYTES)
+  bound.set([BIND_TAG_USER_ADDRESS, 0, 20, ...Buffer.from(head.address.slice(2), 'hex')])
+  const packed = packBytes(bound)
+  out.push({ name: 'bind', value: await backend.poseidon2([TYPE_BIND, BigInt(packed.length), ...packed]) })
+  return out
+}
+
+/** Format 2: one outer proof. Returns the registry it starts from, its date and its nullifier. */
+async function verifyOuter(head: PackageHead, outer: PackagedProof, pins: ProofPins, backend: ProofBackend): Promise<{ anchor: string; date: bigint; nullifier: bigint }> {
+  const expected = await expectedCommitments(head, backend)
+  // The circuit is fixed by what the letter claims: a proof of fewer statements
+  // cannot be passed off under a letter that states more.
+  if (outer.circuit !== `outer_count_${OUTER_BASE_PROOFS + expected.length}`) throw new Invalid('the proof is not the kind this letter’s claims need')
+  if (outer.publicInputs.length !== OUTER_FIXED_INPUTS + expected.length) throw new Invalid(`the proof has ${outer.publicInputs.length} public inputs, not ${OUTER_FIXED_INPUTS + expected.length}`)
+  const vk = pins.vkeys[outer.circuit]
+  if (!vk || !pins.circuitRoot) throw new Unsupported(`no verification key for circuit ${outer.circuit}`)
+  if (!(await backend.verify(new Uint8Array(Buffer.from(vk, 'base64')), outer.proof, outer.rawInputs))) throw new Invalid('the proof does not verify')
+
+  const pi = outer.publicInputs
+  const anchor = pins.roots.find((r) => BigInt(r.root) === pi[0])
+  if (!anchor) throw new Unsupported('the proofs start from a certificate registry this version does not hold')
+  // Every inner proof was checked, inside the proof, against a key in THIS
+  // registry. A proof naming another registry was made with circuits we know
+  // nothing about.
+  if (pi[1] !== BigInt(pins.circuitRoot)) throw new Unsupported('the proof was made with a set of circuits this version does not hold')
+  if (pi[3] !== scopeHash(head.scope) || pi[4] !== scopeHash(head.subscope)) throw new Invalid('the proof is for a different scope')
+  expected.forEach((e, i) => {
+    if (pi[5 + i] !== e.value) throw new Invalid(`the ${e.name} proof was made for different parameters than the letter states`)
+  })
+  const [type, nullifier, oprf, method] = pi.slice(5 + expected.length) as [bigint, bigint, bigint, bigint]
+  if (type !== 0n || oprf !== 0n) throw new Unsupported('salted nullifiers')
+  if (nullifier === 0n) throw new Invalid('the proofs do not share one nullifier')
+  if (method !== VERIFICATION_METHOD_ICAO_CHIP) throw new Unsupported('identity data not verified by passport chip signatures')
+  return { anchor: anchor.name, date: pi[2]!, nullifier }
 }
 
 /**
@@ -174,6 +254,23 @@ function parsePackage(pkg: unknown): { address: string; scope: string; subscope:
 export async function verifyProofPackage(pkg: unknown, pins: ProofPins, authorAddress: string | null, nowMs: number, backend: ProofBackend): Promise<ProofResult> {
   try {
     const parsed = parsePackage(pkg)
+    if ('outer' in parsed) {
+      const { anchor, date, nullifier } = await verifyOuter(parsed, parsed.outer, pins, backend)
+      if (date > BigInt(Math.floor(nowMs / 1000) + CLOCK_SLACK_SECONDS)) throw new Invalid('the proofs are dated in the future')
+      if (!authorAddress || authorAddress !== parsed.address) throw new Invalid('the proofs are bound to a different key than the one that signed this letter')
+      return {
+        status: 'verified',
+        facts: {
+          ...(parsed.minAge !== undefined ? { minAge: parsed.minAge } : {}),
+          ...(parsed.nationalityIn ? { nationalityIn: parsed.nationalityIn } : {}),
+          scope: parsed.scope,
+          subscope: parsed.subscope,
+          nullifier: nullifier.toString(16).padStart(64, '0'),
+          provedAt: Number(date),
+          anchor
+        }
+      }
+    }
     const need = (name: string): PackagedProof => {
       const p = parsed.proofs.get(name)
       if (!p) throw new Invalid(`the package has no ${name} proof`)
@@ -228,19 +325,9 @@ export async function verifyProofPackage(pkg: unknown, pins: ProofPins, authorAd
     if (date > BigInt(Math.floor(nowMs / 1000) + CLOCK_SLACK_SECONDS)) throw new Invalid('the proofs are dated in the future')
 
     // 4. Each proof commits to exactly the parameters the letter states.
-    const committed = async (p: PackagedProof, expected: bigint[]): Promise<void> => {
-      if (p.publicInputs[4] !== (await backend.poseidon2(expected))) throw new Invalid(`the ${p.name} proof was made for different parameters than the letter states`)
+    for (const e of await expectedCommitments(parsed, backend)) {
+      if (need(e.name).publicInputs[4] !== e.value) throw new Invalid(`the ${e.name} proof was made for different parameters than the letter states`)
     }
-    if (parsed.minAge !== undefined) await committed(need('age'), [TYPE_AGE, 2n, BigInt(parsed.minAge), 0n])
-    if (parsed.nationalityIn) {
-      const codes = parsed.nationalityIn.map((c) => BigInt(c.charCodeAt(0) * 65536 + c.charCodeAt(1) * 256 + c.charCodeAt(2)))
-      while (codes.length < COUNTRY_SLOTS) codes.push(0n)
-      await committed(need('nationality'), [TYPE_NATIONALITY_INCLUSION, BigInt(COUNTRY_SLOTS), ...codes])
-    }
-    const bound = new Uint8Array(BIND_BYTES)
-    bound.set([BIND_TAG_USER_ADDRESS, 0, 20, ...Buffer.from(parsed.address.slice(2), 'hex')])
-    const packed = packBytes(bound)
-    await committed(bind, [TYPE_BIND, BigInt(packed.length), ...packed])
 
     // 5. And the key they are bound to is the key that signed this letter.
     if (!authorAddress || authorAddress !== parsed.address) throw new Invalid('the proofs are bound to a different key than the one that signed this letter')

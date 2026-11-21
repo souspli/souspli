@@ -148,16 +148,23 @@ for an `eth-eip191` author. Present and wrong makes the whole reading invalid.
 **Passport proof** — type `passport-proof`:
 
 ```
-args: { format: "souspli-passport-proof/1", address, scope, subscope,
+args: { format: "souspli-passport-proof/2", address, scope, subscope,
         claims: { minAge?, nationalityIn? },
-        proofs: [ { name, circuit, publicInputs: ["0x…"], proof (base64) } ] }
+        circuit: "outer_count_N", publicInputs: ["0x…"], proof (base64) }
 ```
 
-A chain of zkPassport UltraHonk proofs named `dsc`, `id_data`, `integrity`, the
-claims (`age`, `nationality`) and `bind`. A reader verifies each under **its own**
-verification key for the named circuit, checks that each continues the last, that
-the chain starts from a certificate registry root it accepts, that the claims and
-`address` are exactly what the proofs commit to, and that `address` is the author.
+One zkPassport UltraHonk proof from its recursive outer circuit, which verifies the
+chain (`dsc`, `id_data`, `integrity`), the claims (`age`, `nationality`) and `bind`
+inside itself. `N` is three plus the number of claims plus one. A reader verifies it
+under **its own** key for that circuit, and checks that `N` is the one the stated
+claims need, that the proof names a certificate registry root and a circuit registry
+root it accepts, that the claims and `address` are exactly what the proof commits
+to, and that `address` is the author.
+
+Format `souspli-passport-proof/1` carries the same chain as separate proofs,
+`proofs: [ { name, circuit, publicInputs, proof } ]`, each verified under the
+reader's key for its circuit and checked to continue the last. It is about six times
+the size, and still accepted.
 `scope` and `subscope` are text; the proofs carry their hashes, and with them a
 nullifier that is constant for one passport within one scope.
 
