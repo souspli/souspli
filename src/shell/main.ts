@@ -1408,6 +1408,10 @@ app.whenReady().then(async () => {
       // A ballot's count, and what you may do about it: worked out here from
       // the votes and closings held, never by the ballot's own page.
       ballot: !draft && stored.manifest.type === 'ballot' ? ballotFacts(envelopeHash) : null,
+      // A group's admission rule, in words. The Group type neither shows nor
+      // can change it, so without this the person about to sign a group has
+      // no way to see what it will require. Null when there is no rule.
+      requires: stored.manifest.type === 'group' ? requiresOf(cborToJs(stored.manifest.args)) : null,
       draft: draft !== null,
       replyTo: claimed,
       replyToKnown: claimed ? library.get(claimed) !== null : false,
@@ -2163,12 +2167,18 @@ app.whenReady().then(async () => {
     const ballot = ballotOf(hash)
     if (!ballot) return { error: 'not a ballot Souspli can read' }
     if (!ballot.witnesses.some((w) => w.id === keyId(keyring.signer.scheme, myKeyHex()))) return { error: 'this ballot does not name you a witness' }
-    if (ballot.closes !== null && Date.now() < ballot.closes) return { error: `this ballot asks its witnesses to close it at ${new Date(ballot.closes).toISOString()}, which is not yet` }
+    if (ballot.closes !== null && Date.now() < ballot.closes) return { error: `this ballot asks its witnesses to close it at ${new Date(ballot.closes).toLocaleString()}, which is not yet` }
     const { votes, unchecked } = ballotLetters(hash)
     if (unchecked > 0) return { error: `${unchecked} vote(s) are still being checked; try again in a moment` }
     const listed = validVotes(ballot, hash, votes).map((v) => v.envelopeHash)
     const signed = await signStarter('starter:ballot-close', 'ballot-close', { attests: hash, votes: encodeClosing(listed) })
     return signed.error ? signed : { ...signed, listed: listed.length }
+  }
+
+  /** A group's admission rule as a sentence, or null when it has none. */
+  function requiresOf(groupArgs: unknown): string | null {
+    const rule = passportRuleOf(groupArgs)
+    return rule ? describeRule(rule) : null
   }
 
   /** Why you cannot act in a forum, or null when you can. */
@@ -2485,6 +2495,15 @@ app.whenReady().then(async () => {
     return { rows, tribeEmpty: tribe.size === 0 }
   }
 
+  /** How many letters a forum's listing would show, replies included. */
+  function forumPostCount(rootHash: string): number {
+    const gate = gateOf(rootHash)
+    return library
+      .forumPosts(rootHash, 1000)
+      .filter((r) => !isForumMachinery(r))
+      .filter((r) => countsIn(gate, r.authorScheme, r.authorKey)).length
+  }
+
   /** Groups in this library that could be read as forums: every group whose
    *  current version you hold. */
   function forums(): Record<string, unknown>[] {
@@ -2497,7 +2516,10 @@ app.whenReady().then(async () => {
       if (seen.has(root)) continue
       seen.add(root)
       const facts = forumFacts(root)
-      if (!facts.error) out.push({ ...facts, posts: library.forumPosts(root, 1000).length })
+      // Counted the way the forum's own listing counts: votes, join requests
+      // and proofs are how a forum works, not things posted in it, and in a
+      // forum that admits by proof only members' letters count at all.
+      if (!facts.error) out.push({ ...facts, posts: forumPostCount(root) })
     }
     return out
   }

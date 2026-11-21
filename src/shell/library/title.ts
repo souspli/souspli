@@ -24,8 +24,9 @@
 /** Fields a program might keep its one-line summary in, best first. The
  *  built-in types cover: article/invite/todo/poster/contract `title`, memo
  *  `subject`, nametag/card/group/vouch `name`, invoice `invoiceNumber`,
- *  attestation `statement`, comment `body`, join-request `say`. */
-const TITLE_FIELDS = ['title', 'subject', 'name', 'invoiceNumber', 'statement', 'body', 'message', 'say'] as const
+ *  attestation `statement`, comment `body`, join-request `say`, ballot
+ *  `question`. */
+const TITLE_FIELDS = ['title', 'subject', 'name', 'invoiceNumber', 'statement', 'body', 'message', 'say', 'question'] as const
 
 export const MAX_TITLE_CHARS = 80
 
