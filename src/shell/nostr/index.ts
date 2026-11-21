@@ -1,4 +1,4 @@
-import { parseThingEvent, buildThingEvent, THING_KIND, MAX_INLINE_BUNDLE, TAG, type NostrEvent, type ParsedThingEvent } from './event.js'
+import { parseThingEvent, buildThingEvent, buildAnonymousThingEvent, THING_KIND, MAX_INLINE_BUNDLE, TAG, type NostrEvent, type ParsedThingEvent } from './event.js'
 
 // ── Relays ───────────────────────────────────────────────────────────────────
 // One long-lived connection per relay, subscriptions on top — the shape the
@@ -9,7 +9,7 @@ import { parseThingEvent, buildThingEvent, THING_KIND, MAX_INLINE_BUNDLE, TAG, t
 // arrival is parsed defensively, bounded, and handed to admission, which is the
 // only thing here that decides whether a thing is real.
 
-export { buildThingEvent, parseThingEvent, THING_KIND, MAX_INLINE_BUNDLE, TAG }
+export { buildThingEvent, buildAnonymousThingEvent, parseThingEvent, THING_KIND, MAX_INLINE_BUNDLE, TAG }
 export type { NostrEvent, ParsedThingEvent }
 
 export interface RelayStatus {

@@ -82,3 +82,29 @@ test('the header states what held, and the letter makes no claim of its own', as
   expect(page).toContain('checked by Souspli and stated in the header')
   expect(page).not.toMatch(/[✓✔]|verified/i)
 })
+
+// Format 2: the same statement as ONE proof (zkPassport's outer circuit).
+test('a single-proof package verifies the same way, and its letter is small enough for a relay', async () => {
+  const c = await open(ALICE, load('alice-2.json'))
+  expect(c).toMatchObject({ kind: 'passport-proof', status: 'verified' })
+  expect(c?.proof).toMatchObject({ minAge: 18, nationalityIn: ['AUS', 'NZL'], scope: 'souspli:test' })
+  expect(await open(MALLORY, load('alice-2.json'))).toMatchObject({ status: 'invalid', reason: expect.stringContaining('bound to a different key') })
+
+  const tar = await buildBundle(ethSigner(ALICE), { type: 'passport-proof', program, args: jsToCbor(load('alice-2.json')) })
+  expect(tar.length).toBeLessThan(32 * 1024) // the inline cap; six separate proofs make about 130 KB
+  expect((await buildBundle(ethSigner(ALICE), { type: 'passport-proof', program, args: jsToCbor(load('alice.json')) })).length).toBeGreaterThan(32 * 1024)
+})
+
+test('the type shows a single-proof package like any other, and keeps every field when writing one', async () => {
+  const r = await shell.ingest(await buildBundle(ethSigner(ALICE), { type: 'passport-proof', program, args: jsToCbor(load('alice-2-age.json')), created: 1_794_000_900 }))
+  await chromeEval(`window.__shellChrome.openThing(${JSON.stringify(r.envelopeHash)})`)
+  await expect
+    .poll(() => chromeEval<string | null>(`document.querySelector('[data-testid=header-credential]')?.textContent ?? null`), { timeout: 20_000 })
+    .toBe('✓ passport proof: 18+')
+  const page = await shell.app.evaluate(async (electron) => {
+    const s = (electron.app as unknown as { __shell: { modeState: () => { viewWcId: number | null } | null } }).__shell.modeState()
+    return (await electron.webContents.fromId(s!.viewWcId!)!.executeJavaScript(`document.querySelector('.page').textContent`)) as string
+  })
+  expect(page).toContain('Aged 18 or over')
+  expect(page).not.toContain('No proofs yet')
+})

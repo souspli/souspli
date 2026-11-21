@@ -25,7 +25,9 @@
   <div class="page"><div id="app"></div></div>
   <script>
     'use strict';
-    // State: args { format, address, scope, subscope, claims { minAge, nationalityIn }, proofs [...] }
+    // State: args { format, address, scope, subscope, claims { minAge, nationalityIn },
+    //               circuit, publicInputs, proof }   (format 2: one proof)
+    //          or  { …, proofs [...] }                (format 1: one proof per step)
     // -- a proof package as nfcid's zk/package.sh writes it: zero-knowledge
     // proofs that SOME passport satisfies `claims` and is bound to `address`,
     // without the passport.
@@ -35,7 +37,14 @@
     // letter, so it cannot tell whether `address` is the author. Souspli checks
     // every proof against its own keys and the author's key, and the header
     // states what held. So: no tick anywhere below.
-    var FORMAT = 'souspli-passport-proof/1';
+    var FORMAT_1 = 'souspli-passport-proof/1';
+    var FORMAT_2 = 'souspli-passport-proof/2';
+    // Whether `data` has the shape of a package. Not whether its proofs hold.
+    function isPackage(data) {
+      if (!data) return false;
+      if (str(data.format) === FORMAT_2) return typeof data.proof === 'string' && Array.isArray(data.publicInputs) && typeof data.circuit === 'string';
+      return str(data.format) === FORMAT_1 && Array.isArray(data.proofs);
+    }
     var a = window.bridge.getArgs() || {};
     var args = (a && typeof a.args === 'object' && a.args !== null) ? a.args : {};
     var app = document.getElementById('app');
@@ -71,7 +80,7 @@
     function summary(data) {
       var frag = document.createDocumentFragment();
       frag.append(el('h1', 'Passport proof'));
-      if (str(data.format) !== FORMAT || !Array.isArray(data.proofs)) {
+      if (!isPackage(data)) {
         frag.append(el('p', 'No proofs yet.'));
         return frag;
       }
@@ -93,15 +102,20 @@
     }
 
     function editMode() {
-      var current = str(args.format) === FORMAT ? args : null;
+      var current = isPackage(args) ? args : null;
       var error = el('div', undefined, 'err'); error.id = 'edit-error';
       var preview = el('div');
       var status = el('div', undefined, 'note');
 
       function emit() {
         // Whole-set replacement: every field of the package, every time.
-        var out = current ? { format: current.format, address: current.address, scope: current.scope,
-          subscope: str(current.subscope), claims: current.claims || {}, proofs: current.proofs } : {};
+        var out = {};
+        if (current) {
+          out = { format: current.format, address: current.address, scope: current.scope,
+            subscope: str(current.subscope), claims: current.claims || {} };
+          if (str(current.format) === FORMAT_2) { out.circuit = current.circuit; out.publicInputs = current.publicInputs; out.proof = current.proof; }
+          else out.proofs = current.proofs;
+        }
         window.bridge.emit('draft', { type: 'passport-proof', args: out });
       }
       function render() {
@@ -114,7 +128,7 @@
       function load(text) {
         var pkg;
         try { pkg = JSON.parse(text); } catch (e) { error.textContent = 'That file is not a proof package (not JSON).'; return; }
-        if (!pkg || str(pkg.format) !== FORMAT || !Array.isArray(pkg.proofs) || !/^0x[0-9a-f]{40}$/.test(str(pkg.address))) {
+        if (!isPackage(pkg) || !/^0x[0-9a-f]{40}$/.test(str(pkg.address))) {
           error.textContent = 'That file is not a Souspli passport proof package.'; return;
         }
         error.textContent = '';

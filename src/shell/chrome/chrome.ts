@@ -296,6 +296,9 @@ interface HeaderFacts {
    *  passport reading), checked against the author key. Null for every other
    *  type. The letter's own program has no part in this. */
   credential?: CredentialFacts | null
+  /** When this letter is a group with an admission rule: the rule in words,
+   *  as the shell reads it. The Group type itself never shows it. */
+  requires?: string | null
   /** When this letter IS a ballot: its count and what you may do, as the shell
    *  worked them out from the votes and witness closings you hold. */
   ballot?: BallotFacts | { error: string } | null
@@ -3615,7 +3618,7 @@ function ballotBits(ballotHash: string, b: BallotFacts | { error: string }): HTM
   if (!b.closed) {
     const voteBtn = el('button', 'evm-btn evm-btn--primary evm-btn--sm', b.myVote ? 'Change vote…' : 'Vote…')
     voteBtn.setAttribute('data-testid', 'header-ballot-vote')
-    voteBtn.addEventListener('click', () => openBallotVoteModal(ballotHash, b))
+    voteBtn.addEventListener('click', () => void openBallotVoteModal(ballotHash, b))
     out.push(voteBtn)
   }
   if (b.iAmWitness && !b.iHaveClosed) {
@@ -3625,9 +3628,21 @@ function ballotBits(ballotHash: string, b: BallotFacts | { error: string }): HTM
       ? 'Publish, under your own key, the list of valid votes you hold now. Votes you do not list will need the other witnesses to count.'
       : 'This ballot has not reached the time its author asked witnesses to close it.'
     closeBtn.addEventListener('click', async () => {
+      // A closing statement is signed with your own key and stands for good,
+      // so it is asked for like every other signature -- never on one click.
+      if (
+        b.pastClose &&
+        !(await confirmDanger(
+          'Close this ballot?',
+          'This signs, with your identity, the list of valid votes you hold right now, publishes it to your feed, and sends it to your relays if you have any. It cannot be unsaid. A vote that reaches you later is not on this list; you may publish a newer statement, and your latest one stands.',
+          'Sign closing statement'
+        ))
+      )
+        return
       const r = await shell.ballotClose(ballotHash)
       if (r.error) return showText(`Could not close: ${r.error}`, 'danger')
-      showText(`Closing statement published, listing ${r.listed ?? 0} vote(s)`, 'success')
+      const sent = r.envelopeHash ? await shell.postToRelays(String(r.envelopeHash)).catch(() => null) : null
+      showText(`Closing statement published, listing ${r.listed ?? 0} vote(s)${sent && !sent.error ? ', and sent to your relays' : ''}`, 'success')
     })
     out.push(closeBtn)
   }
@@ -3640,7 +3655,7 @@ function ballotBits(ballotHash: string, b: BallotFacts | { error: string }): HTM
  * resulting package and the choice. Souspli checks the proofs before it signs
  * anything, and signs with that one-time key -- never with your identity.
  */
-function openBallotVoteModal(ballotHash: string, b: BallotFacts): void {
+async function openBallotVoteModal(ballotHash: string, b: BallotFacts): Promise<void> {
   const overlay = el('div', 'evm-modal-overlay')
   const modal = el('div', 'evm-modal')
   modal.setAttribute('data-testid', 'ballot-vote-modal')
@@ -3655,6 +3670,15 @@ function openBallotVoteModal(ballotHash: string, b: BallotFacts): void {
   how.style.overflowWrap = 'anywhere'
   how.textContent = `Who may vote: ${b.rule}. Make a proof package for the address ${b.voteAddress} with the scope ${b.voteScope}, then choose it below. That address is a key for this ballot only: it is not your identity and cannot be linked to it by anyone else.`
   body.append(how)
+  // Said before the vote is cast, because casting is what sends it.
+  const openRelays = (await shell.relays().catch(() => ({ relays: [] as { state: string }[] }))).relays.filter((x) => x.state === 'open').length
+  const where = el('div', 'sh-hint')
+  where.setAttribute('data-testid', 'ballot-vote-where')
+  where.textContent =
+    openRelays > 0
+      ? `Casting sends your vote to ${openRelays === 1 ? 'your relay' : `your ${openRelays} relays`} so the witnesses can receive it. It goes under a key made for that one message, not your relay key. The relay still learns the IP address it came from.`
+      : 'You have no relay connected, so your vote will stay in your library until you pass it on to the witnesses as a file.'
+  body.append(where)
 
   let choice = -1
   const picks = el('div')
@@ -3690,7 +3714,12 @@ function openBallotVoteModal(ballotHash: string, b: BallotFacts): void {
     cast.removeAttribute('disabled')
     if (r.error) return void (problem.textContent = r.error)
     overlay.remove()
-    showText('Vote cast under a one-time key. Pass it on to the witnesses to be counted.', 'success')
+    // Out through the relays, so the witnesses can receive it: under a key
+    // made for that one message, never your relay key (the shell sees to it).
+    const sent = openRelays > 0 && r.envelopeHash ? await shell.postToRelays(r.envelopeHash).catch(() => ({ error: 'could not reach the relays' }) as Record<string, unknown>) : null
+    if (sent && !sent.error) showText(`Vote cast under a one-time key and sent to ${openRelays} relay${openRelays === 1 ? '' : 's'}.`, 'success')
+    else if (sent?.error) showText(`Vote cast, but not sent: ${String(sent.error)}. Pass it on to the witnesses as a file.`, 'danger')
+    else showText('Vote cast under a one-time key. Pass it on to the witnesses to be counted.', 'success')
   })
   const cancel = el('button', 'evm-btn evm-btn--ghost', 'Cancel')
   cancel.addEventListener('click', () => overlay.remove())
@@ -3897,6 +3926,15 @@ function renderHeader(h: HeaderFacts | null): void {
     ballotSlot.setAttribute('data-envelope-hash', h.envelopeHash)
     ballotSlot.append(...ballotBits(h.envelopeHash, h.ballot))
     credentialBits.push(ballotSlot)
+  }
+  if (h.requires) {
+    // Not a ✓: this is what the group asks for, not something that was checked.
+    const rule = el('span', 'evm-badge evm-badge--warning', `admits by ${h.requires}`)
+    rule.setAttribute('data-testid', 'header-requires')
+    rule.title = h.draft
+      ? 'This rule will be signed into the group and stays with it through every later version. To start a group without it, discard this draft and use New → Group.'
+      : 'Only keys that publish a passport proof meeting this rule into the group are counted in it: one passport, one member.'
+    credentialBits.push(rule)
   }
   const hashEl = el('span', 'sh-hash evm-address evm-address--muted', short(h.envelopeHash, 8))
   // Copy: the shell-level "edit this object" primitive — things are immutable,
