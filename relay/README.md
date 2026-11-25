@@ -133,9 +133,14 @@ the relay a publishing bot such as [newsread](https://github.com/gearcat0/newsre
 announces articles on and reads sealed subscribe letters from, so a news burst never
 competes with forum traffic on `relay.souspli.org`.
 
-1. Change the route in `env.news` to the domain readers should add (it ships as
-   `news-relay.souspli.org`).
+Readers add `wss://news-relay.souspli.org`. `TRUSTED_PUBKEYS` there is
+newsread's relay key, `4820a36f9661a616…`.
+
+1. To run it elsewhere, change the route in `env.news` to the domain readers
+   should add.
 2. Set `TRUSTED_PUBKEYS` to the bot's relay key — `newsread relays` prints it.
+   Keep it in `wrangler.jsonc`: a value passed with `--var` is gone after the
+   next deploy without it.
 3. `npm run deploy -- --env news` (or a second dashboard Worker with
    `npx wrangler deploy --env news` as its deploy command).
 

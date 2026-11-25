@@ -35,7 +35,7 @@
   // its own limits. Deploy with: npm run deploy -- --env news
   //
   // Bindings and vars are not inherited by an environment, so everything is
-  // restated here. Change the route to the domain you want readers to add.
+  // restated here. The route is the address readers add in Settings.
   "env": {
     "news": {
       "routes": [{ "pattern": "news-relay.souspli.org", "custom_domain": true }],
@@ -50,9 +50,10 @@
         "EVENTS_PER_PUBKEY_PER_HOUR": "60",
         "EVENTS_PER_IP_PER_HOUR": "120",
         "BLOCKED_PUBKEYS": "",
-        // The bot's relay key (`newsread relays` prints it), so a burst of
-        // articles is never refused. Comma-separated hex x-only keys.
-        "TRUSTED_PUBKEYS": ""
+        // newsread's relay key (`newsread relays` prints it), so a burst of
+        // articles is never refused. Comma-separated hex x-only keys. Kept
+        // here rather than passed with --var, which the next deploy would drop.
+        "TRUSTED_PUBKEYS": "4820a36f9661a6161054df14e3e1d3ed648fc315640a876f1c2003acf57d33b2"
       }
     }
   }
