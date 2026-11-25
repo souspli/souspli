@@ -102,6 +102,21 @@ export async function buildThingEvent(
   return { ...unsigned, id, sig }
 }
 
+/** Build an event for a letter under a key made for this one event and then
+ *  forgotten, for a letter whose author must not be linked to its poster: a
+ *  ballot vote is signed by a key that names nobody, and posting it under the
+ *  voter's own relay key would name them after all. Unlike a sealed letter the
+ *  event still says what it carries -- the letter is public, only its sender
+ *  is not. */
+export async function buildAnonymousThingEvent(input: ThingEventInput): Promise<NostrEvent> {
+  const oneTime = secp256k1.utils.randomSecretKey()
+  try {
+    return await buildThingEvent(input, oneTime)
+  } finally {
+    oneTime.fill(0)
+  }
+}
+
 /** The `thing-type` of an event carrying a SEALED letter. Nothing else about
  *  the letter is said: its real type is inside the ciphertext. */
 export const SEALED_TYPE = 'sealed'

@@ -17,7 +17,7 @@ const load = (name: string): Record<string, any> => JSON.parse(readFileSync(join
 const fixturePins = load('pins.json')
 // The app's own verification keys, plus the made-up state's registry root.
 const pins: ProofPins = { ...shipped, roots: [{ name: 'fixture registry', root: fixturePins.registryRoot }] }
-const NOW = Date.UTC(2026, 10, 19)
+const NOW = Date.UTC(2026, 10, 22)
 
 let backend: ProofBackend & { close(): Promise<void> }
 beforeAll(async () => {
@@ -142,6 +142,90 @@ describe('verifyProofPackage', () => {
       expect(['invalid', 'unverifiable']).toContain((await verify(junk)).status)
     }
     expect(await verify({ ...alice(), format: 'souspli-passport-proof/9' })).toMatchObject({ status: 'unverifiable' })
+  })
+})
+
+// Format 2: the same chain wrapped in zkPassport's outer circuit -- one proof.
+describe('verifyProofPackage, single-proof packages', () => {
+  const one = (name = 'alice-2.json'): Record<string, any> => load(name)
+
+  it('verifies each size: two claims, one claim, and the bind alone', async () => {
+    expect(await verify(one())).toMatchObject({ status: 'verified', facts: { minAge: 18, nationalityIn: ['AUS', 'NZL'], scope: 'souspli:test', anchor: 'fixture registry' } })
+    const age = await verify(one('alice-2-age.json'))
+    expect(age).toMatchObject({ status: 'verified', facts: { minAge: 18 } })
+    expect((age as any).facts.nationalityIn).toBeUndefined()
+    const bind = await verify(one('alice-2-bind.json'))
+    expect(bind).toMatchObject({ status: 'verified' })
+    expect((bind as any).facts.minAge).toBeUndefined()
+  })
+
+  it('is small enough for a letter to travel through a relay', () => {
+    // The inline cap is 32 KiB for the whole bundle; the six separate proofs are about 120 KB.
+    expect(JSON.stringify(one()).length).toBeLessThan(22 * 1024)
+  })
+
+  it('one passport in one scope has one nullifier, whichever format or claims', async () => {
+    const all = await Promise.all([verify(one()), verify(one('alice-2-age.json')), verify(one('alice-2-bind.json'))])
+    const marks = new Set(all.map((r) => (r as any).facts.nullifier))
+    expect(marks.size).toBe(1)
+    // alice.json (format 1) is the same passport in the same scope.
+    expect(marks).toContain(((await verify(alice())) as any).facts.nullifier)
+  })
+
+  it('refuses proofs bound to another key', async () => {
+    expect(await verify(one(), '0x' + '9'.repeat(40))).toMatchObject({ status: 'invalid', reason: expect.stringContaining('bound to a different key') })
+    expect(await verify({ ...one(), address: '0x' + '9'.repeat(40) }, '0x' + '9'.repeat(40))).toMatchObject({ status: 'invalid', reason: expect.stringContaining('different parameters') })
+  })
+
+  it('refuses claims the proof was not made for', async () => {
+    const pkg = one()
+    expect(await verify({ ...pkg, claims: { ...pkg.claims, minAge: 21 } })).toMatchObject({ status: 'invalid', reason: expect.stringContaining('age proof was made for different parameters') })
+    expect(await verify({ ...pkg, claims: { ...pkg.claims, nationalityIn: ['AUS'] } })).toMatchObject({ status: 'invalid', reason: expect.stringContaining('nationality proof was made for different parameters') })
+  })
+
+  it('refuses a claim with no proof behind it: the circuit is fixed by the claims', async () => {
+    // The bind-only proof, under a letter that also states an age.
+    expect(await verify({ ...one('alice-2-bind.json'), claims: { minAge: 18 } })).toMatchObject({ status: 'invalid', reason: expect.stringContaining('not the kind') })
+    // And naming the bigger circuit does not help: the proof is not one of its.
+    expect(await verify({ ...one('alice-2-bind.json'), claims: { minAge: 18 }, circuit: 'outer_count_5' })).toMatchObject({ status: 'invalid' })
+    // A proof of more, under a letter that states less.
+    expect(await verify({ ...one(), claims: { minAge: 18 } })).toMatchObject({ status: 'invalid', reason: expect.stringContaining('not the kind') })
+  })
+
+  it('refuses a different scope', async () => {
+    expect(await verify({ ...one(), scope: 'souspli:elsewhere' })).toMatchObject({ status: 'invalid', reason: expect.stringContaining('different scope') })
+    expect(await verify({ ...one(), subscope: 'x' })).toMatchObject({ status: 'invalid', reason: expect.stringContaining('different scope') })
+  })
+
+  it('refuses any altered public input or proof byte', async () => {
+    const pkg = one()
+    for (let i = 0; i < pkg.publicInputs.length; i++) {
+      const inputs = [...pkg.publicInputs]
+      inputs[i] = '0x' + (BigInt(inputs[i]) ^ 1n).toString(16)
+      expect((await verify({ ...pkg, publicInputs: inputs })).status, `input ${i}`).not.toBe('verified')
+    }
+    const bytes = Buffer.from(pkg.proof, 'base64')
+    bytes[1000] ^= 1
+    expect(await verify({ ...pkg, proof: bytes.toString('base64') })).toMatchObject({ status: 'invalid', reason: expect.stringContaining('does not verify') })
+  })
+
+  it('cannot vouch for a certificate registry or a set of circuits the app does not pin', async () => {
+    expect(await verify(one(), undefined, { ...pins, roots: [] })).toMatchObject({ status: 'unverifiable' })
+    expect(await verify(one(), undefined, { ...pins, circuitRoot: '0x' + '1'.repeat(64) })).toMatchObject({ status: 'unverifiable', reason: expect.stringContaining('set of circuits') })
+    const { circuitRoot: _gone, ...without } = pins
+    expect(await verify(one(), undefined, without)).toMatchObject({ status: 'unverifiable' })
+    expect(await verify(one(), undefined, { ...pins, vkeys: {} })).toMatchObject({ status: 'unverifiable' })
+  })
+
+  it('refuses proofs dated in the future', async () => {
+    expect(await verify(one(), undefined, pins, Date.UTC(2026, 0, 1))).toMatchObject({ status: 'invalid', reason: expect.stringContaining('future') })
+  })
+
+  it('the app’s shipped keys are the ones the fixture was proved under', () => {
+    const made = load('pins-2.json')
+    for (const [circuit, vk] of Object.entries(made.vkeys)) expect(shipped.vkeys[circuit as keyof typeof shipped.vkeys], circuit).toBe(vk)
+    expect(shipped.circuitRoot).toBe(made.circuitRoot)
+    expect(made.registryRoot).toBe(fixturePins.registryRoot)
   })
 })
 

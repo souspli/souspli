@@ -78,6 +78,10 @@ then **New → Passport proof**, choose the file, publish. The header shows **�
 passport proof: 18+ · citizen of CAN**. The name, number and date of birth are not
 in the letter at all.
 
+The package is a single proof of about 20 KB, so the letter is small enough to post
+through a relay like any other. (Packages made with older versions of the tools hold six separate proofs
+and are about 120 KB; they still verify, but travel only as a file.)
+
 Three things to know:
 
 - **The scope decides what links.** One passport always shows the same mark (its
@@ -121,7 +125,12 @@ same kind of rule), and name the **witnesses** and how many of them must agree.
 this ballot alone and the ballot's scope; make a proof package for those, choose it
 and your option, and cast. The vote is a letter signed by that one-time key. It does
 not carry your identity, your Nostr key, or anything that links to them; only your
-computer can tell it is yours. Pass it to the witnesses like any other letter.
+computer can tell it is yours.
+
+If you have a relay connected, casting also sends the vote there, so the witnesses
+receive it. It goes under a key made for that one message: never your own relay key,
+which would name you. The relay still learns the network address it came from. With
+no relay, pass the vote to the witnesses as a file.
 
 **Counting.** Every reader counts for themselves: each valid vote they hold, one per
 passport, a later vote replacing an earlier one.
