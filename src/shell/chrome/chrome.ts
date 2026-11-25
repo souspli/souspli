@@ -296,6 +296,9 @@ interface HeaderFacts {
    *  passport reading), checked against the author key. Null for every other
    *  type. The letter's own program has no part in this. */
   credential?: CredentialFacts | null
+  /** When this letter is a group with an admission rule: the rule in words,
+   *  as the shell reads it. The Group type itself never shows it. */
+  requires?: string | null
   /** When this letter IS a ballot: its count and what you may do, as the shell
    *  worked them out from the votes and witness closings you hold. */
   ballot?: BallotFacts | { error: string } | null
@@ -3625,6 +3628,17 @@ function ballotBits(ballotHash: string, b: BallotFacts | { error: string }): HTM
       ? 'Publish, under your own key, the list of valid votes you hold now. Votes you do not list will need the other witnesses to count.'
       : 'This ballot has not reached the time its author asked witnesses to close it.'
     closeBtn.addEventListener('click', async () => {
+      // A closing statement is signed with your own key and stands for good,
+      // so it is asked for like every other signature -- never on one click.
+      if (
+        b.pastClose &&
+        !(await confirmDanger(
+          'Close this ballot?',
+          'This signs, with your identity, the list of valid votes you hold right now, and publishes it to your feed. It cannot be unsaid. A vote that reaches you later is not on this list; you may publish a newer statement, and your latest one stands.',
+          'Sign closing statement'
+        ))
+      )
+        return
       const r = await shell.ballotClose(ballotHash)
       if (r.error) return showText(`Could not close: ${r.error}`, 'danger')
       showText(`Closing statement published, listing ${r.listed ?? 0} vote(s)`, 'success')
@@ -3897,6 +3911,15 @@ function renderHeader(h: HeaderFacts | null): void {
     ballotSlot.setAttribute('data-envelope-hash', h.envelopeHash)
     ballotSlot.append(...ballotBits(h.envelopeHash, h.ballot))
     credentialBits.push(ballotSlot)
+  }
+  if (h.requires) {
+    // Not a ✓: this is what the group asks for, not something that was checked.
+    const rule = el('span', 'evm-badge evm-badge--warning', `admits by ${h.requires}`)
+    rule.setAttribute('data-testid', 'header-requires')
+    rule.title = h.draft
+      ? 'This rule will be signed into the group and stays with it through every later version. To start a group without it, discard this draft and use New → Group.'
+      : 'Only keys that publish a passport proof meeting this rule into the group are counted in it: one passport, one member.'
+    credentialBits.push(rule)
   }
   const hashEl = el('span', 'sh-hash evm-address evm-address--muted', short(h.envelopeHash, 8))
   // Copy: the shell-level "edit this object" primitive — things are immutable,

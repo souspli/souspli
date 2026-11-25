@@ -9,6 +9,7 @@ describe('claimedTitle', () => {
     expect(claimedTitle({ subject: 'Friday', message: 'long…' })).toBe('Friday')
     expect(claimedTitle({ name: 'Ada' })).toBe('Ada')
     expect(claimedTitle({ invoiceNumber: 'INV-0042' })).toBe('INV-0042')
+    expect(claimedTitle({ question: 'Shall we meet?', options: ['Yes', 'No'] })).toBe('Shall we meet?')
     expect(claimedTitle({ replyTo: 'ab'.repeat(32), body: 'I disagree.\nAt length.' })).toBe('I disagree.')
   })
 
