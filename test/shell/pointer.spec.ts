@@ -241,6 +241,24 @@ test('a magnet pointer is offered too — the case pointers exist for', async ()
   expect(await shell.transfers()).toMatchObject({ downloads: [] })
 })
 
+test('a magnet that names no usable infohash is not an offer', async () => {
+  // It could never download -- startTransfer refuses it -- so recording it
+  // would only put a dead row in front of a person, or, for a subscribed
+  // author, spend the hourly allowance on a transfer that cannot start.
+  const t = await thing()
+  for (const locator of ['magnet:?dn=big.thing', 'magnet:?xt=urn:btih:&dn=x', `magnet:?xt=urn:btih:${'a'.repeat(39)}`, 'magnet:?xt=urn:btih:zz']) {
+    await advertise({ hash: t.hash, locator })
+  }
+  // A good one after them, so their absence is not just slowness.
+  const good = await thing()
+  await advertise({ hash: good.hash, locator: `magnet:?xt=urn:btih:${'b'.repeat(40)}&dn=big.thing` })
+  await expect.poll(async () => (await shell.offers()).map((o) => o.envelopeHash), { timeout: 15_000 }).toEqual([good.hash])
+  // base32 is a v1 infohash too.
+  const b32 = await thing()
+  await advertise({ hash: b32.hash, locator: `magnet:?xt=urn:btih:${'A'.repeat(32)}` })
+  await expect.poll(async () => (await shell.offers()).some((o) => o.envelopeHash === b32.hash), { timeout: 15_000 }).toBe(true)
+})
+
 test('an offered post ranks in its forum, and says it is not here', async () => {
   // Votes point at a HASH whether or not you hold the thing, so an offer can
   // be ranked exactly like a post — which is what stops a large post sitting
