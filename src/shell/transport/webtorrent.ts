@@ -22,10 +22,15 @@ interface WebTorrentFile {
 }
 /** A seeded torrent: what the DHT is announcing, and who is connected. */
 export interface WebTorrentSeed {
+  /** Set once the torrent is built ('infoHash' fires); undefined before. */
+  infoHash?: string
   magnetURI: string
   numPeers: number
   length: number
   destroy(cb?: () => void): void
+  /** 'ready': built and its store set up. The bytes are loaded just after. */
+  on(event: 'ready', cb: () => void): void
+  on(event: 'error', cb: (err: unknown) => void): void
 }
 /** A torrent being DOWNLOADED. The getters and events below were read out of
  *  the installed webtorrent (lib/torrent.js) rather than assumed -- see the
@@ -59,7 +64,8 @@ export interface WebTorrentDownload {
 
 export interface WebTorrentClient {
   add(locator: string, opts: { path?: string }, cb: (torrent: WebTorrentDownload) => void): WebTorrentDownload
-  seed(input: Uint8Array | Buffer, opts: { name: string }, cb: (torrent: WebTorrentSeed) => void): void
+  /** `announce` replaces the default public tracker list in the torrent built. */
+  seed(input: Uint8Array | Buffer, opts: { name: string; announce?: string[] }, cb: (torrent: WebTorrentSeed) => void): WebTorrentSeed
   on(event: 'error', cb: (err: unknown) => void): void
   destroy(cb?: () => void): void
 }

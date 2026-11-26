@@ -123,8 +123,15 @@ export class TorrentService {
 
   /** Start serving `tar` under `envelopeHash`. Idempotent: seeding something
    *  already seeded returns the existing magnet rather than a second torrent
-   *  for the same bytes. */
-  async start(envelopeHash: string, tar: Uint8Array, name: string): Promise<{ magnet: string } | { error: string }> {
+   *  for the same bytes.
+   *
+   *  `trackers` are the ones the magnet it arrived by named (see trackersOf).
+   *  Given any, the seed announces to THOSE instead of webtorrent's default
+   *  public list: the publisher's trackers are where everyone following that
+   *  magnet is looking, and the infohash is the same either way -- trackers
+   *  sit outside the info dictionary -- so this joins the publisher's swarm
+   *  rather than starting a parallel one nobody holding the magnet can see. */
+  async start(envelopeHash: string, tar: Uint8Array, name: string, trackers: string[] = []): Promise<{ magnet: string } | { error: string }> {
     const already = this.magnets.get(envelopeHash)
     if (already) return { magnet: already }
     let client: WebTorrentClient
@@ -138,26 +145,53 @@ export class TorrentService {
     }
     return new Promise<{ magnet: string } | { error: string }>((resolve) => {
       let settled = false
-      const timer = setTimeout(() => {
-        if (settled) return
-        settled = true
-        resolve({ error: 'seeding did not start (timed out building the torrent)' })
-      }, 30_000)
-      timer.unref?.()
-      try {
-        client.seed(tar, { name }, (torrent) => {
-          if (settled) return
-          settled = true
-          clearTimeout(timer)
-          this.torrents.set(envelopeHash, torrent)
-          this.magnets.set(envelopeHash, torrent.magnetURI)
-          resolve({ magnet: torrent.magnetURI })
-        })
-      } catch (e) {
+      let torrent: WebTorrentSeed | undefined
+      const accept = (t: WebTorrentSeed): void => {
         if (settled) return
         settled = true
         clearTimeout(timer)
-        resolve({ error: `seeding failed: ${(e as Error).message}` })
+        clearTimeout(grace)
+        this.torrents.set(envelopeHash, t)
+        this.magnets.set(envelopeHash, t.magnetURI)
+        resolve({ magnet: t.magnetURI })
+      }
+      const fail = (error: string): void => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        clearTimeout(grace)
+        // Whatever webtorrent got as far as building must go too. Left in the
+        // client it would carry on announcing a thing the shell says it is
+        // not serving, with no row anywhere to stop it from.
+        try {
+          torrent?.destroy()
+        } catch {
+          /* already gone */
+        }
+        resolve({ error })
+      }
+      // webtorrent's own callback waits for the first DHT announce as well as
+      // the build, and with downloads running that has taken over 30 s. A seed
+      // is serving once it is built and its bytes are loaded; the announce
+      // carries on regardless. So: built ('ready'), a moment for the load,
+      // then it counts as started.
+      let grace: ReturnType<typeof setTimeout> | undefined
+      const timer = setTimeout(() => {
+        if (torrent?.infoHash && torrent.magnetURI) accept(torrent)
+        else fail('seeding did not start (timed out building the torrent)')
+      }, 30_000)
+      timer.unref?.()
+      try {
+        torrent = client.seed(tar, trackers.length ? { name, announce: trackers } : { name }, (t) => accept(t))
+        torrent.on('ready', () => {
+          grace = setTimeout(() => {
+            if (torrent?.magnetURI) accept(torrent)
+          }, 3_000)
+          grace.unref?.()
+        })
+        torrent.on('error', (e) => fail(`seeding failed: ${String((e as Error)?.message ?? e)}`))
+      } catch (e) {
+        fail(`seeding failed: ${(e as Error).message}`)
       }
     })
   }
@@ -383,6 +417,38 @@ const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v)
 export function infoHashOf(magnet: string): string {
   const m = /xt=urn:btih:([0-9a-z]+)/i.exec(magnet)
   return m ? m[1]!.toLowerCase() : ''
+}
+
+/** At most this many trackers are kept from a magnet, each at most this long.
+ *  Together they keep a re-posted magnet well inside the relay's 2048-char tag
+ *  cap, and stop one magnet from making the seeder announce to a hundred hosts. */
+const MAX_TRACKERS = 8
+const MAX_TRACKER_LEN = 128
+
+/** The `tr=` trackers a magnet names that a seed can announce to: the schemes
+ *  webtorrent speaks, deduplicated, in the magnet's order, bounded.
+ *
+ *  These are the publisher's choice, like everything else in a magnet. Using
+ *  them tells those hosts this machine is serving the thing -- which the
+ *  download already told them, since a download announces to the same list. */
+export function trackersOf(magnet: string): string[] {
+  const q = magnet.indexOf('?')
+  if (!/^magnet:/i.test(magnet) || q < 0) return []
+  const out: string[] = []
+  for (const part of magnet.slice(q + 1).split('&')) {
+    const eq = part.indexOf('=')
+    if (eq < 0 || part.slice(0, eq).toLowerCase() !== 'tr') continue
+    let url: string
+    try {
+      url = decodeURIComponent(part.slice(eq + 1).replace(/\+/g, ' ')).trim()
+    } catch {
+      continue
+    }
+    if (url.length > MAX_TRACKER_LEN || !/^(?:udp|https?|wss?):\/\/[^\s/]/i.test(url)) continue
+    if (!out.includes(url)) out.push(url)
+    if (out.length === MAX_TRACKERS) break
+  }
+  return out
 }
 
 /** The `dn=` display name a magnet carries, if any. It is the publisher's

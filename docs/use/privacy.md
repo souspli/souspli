@@ -25,7 +25,7 @@ what you clicked.
 | Paste `bundle:<hash>` | Nobody. It is looked up in your own store. |
 | Paste an `https://` link | That server learns **your IP address** and the time. No cookies or credentials are sent. The box shows `⚠ tells <host> your IP` before you press Ingest. |
 | Paste a `magnet:` link | The BitTorrent DHT and every peer learn **your IP** and that you want this letter. Shown as `⚠ contacts the BitTorrent network` first. |
-| **Seed over BitTorrent** | The DHT and peers learn your IP and that **you hold this letter** — even a sealed one, whose content stays secret. |
+| **Seed over BitTorrent** | The DHT, peers and trackers learn your IP and that **you hold this letter** — even a sealed one, whose content stays secret. A letter that came by magnet is announced to that magnet's trackers, which already saw your IP when you downloaded it. |
 | Add a relay | That relay learns your IP and **what you subscribe to** — the one thing none of the other channels leak. |
 | Say yes to **Find people…** | Exactly the row above, for `relay.souspli.org`, plus the welcome forum's roster is added to your library from inside the app — no fetch. Until you say yes: nothing. The offer itself contacts nobody. |
 | **Join** the community forum (the Forum page) | The row above, plus the name you chose, published as a signed letter: the relay and everyone reading the forum learn **your key's chosen name**. Until you press Join: nothing. **Not now** contacts nobody. |

@@ -7,7 +7,8 @@ import { test, expect, launchShell, type ShellHandle } from './helpers.js'
 // that is actually running:
 //
 //   about memo arrives → Subscribe (guardian) → waiting articles download by
-//   themselves → a sealed "subscribe guardian" memo gets a sealed reply → a
+//   themselves → sharing one joins the bot's swarm (same infohash, the
+//   magnet's trackers, one more seeder at the tracker) → a sealed "subscribe guardian" memo gets a sealed reply → a
 //   NEW article posted after subscribing arrives with no press → "unsubscribe
 //   all" is answered too, so the bot is left without this throwaway reader.
 //
@@ -94,6 +95,36 @@ async function ask(shell: ShellHandle, subject: string): Promise<Row> {
   return reply!
 }
 
+/** Seeders the tracker counts for an infohash, by HTTP scrape. */
+async function seeders(tracker: string, infoHash: string): Promise<number> {
+  const bin = Buffer.from(infoHash, 'hex')
+  const q = [...bin].map((b) => '%' + b.toString(16).padStart(2, '0')).join('')
+  const res = await fetch(`${tracker.replace(/\/announce$/, '/scrape')}?info_hash=${q}`)
+  const body = Buffer.from(await res.arrayBuffer()).toString('latin1')
+  const m = /8:completei(\d+)e/.exec(body)
+  return m ? Number(m[1]) : -1
+}
+
+/** Seed a thing that came by the bot's magnet, and check the tracker sees one more seeder. */
+async function seedJoinsSwarm(shell: ShellHandle, envelopeHash: string, offered: string): Promise<void> {
+  const params = (m: string): URLSearchParams => new URLSearchParams(m.slice(m.indexOf('?') + 1))
+  const tr = params(offered).getAll('tr')
+  const http = tr.find((t) => /^https?:/.test(t))
+  const infoHash = /btih:([0-9a-f]{40})/i.exec(offered)![1]!.toLowerCase()
+  const before = http ? await seeders(http, infoHash) : -1
+  const started = await shell.seedStart(envelopeHash)
+  expect(started.error ?? null).toBeNull()
+  const magnet = String(started.magnet)
+  expect(/btih:([0-9a-f]{40})/i.exec(magnet)![1]!.toLowerCase(), 'the same swarm, not a parallel one').toBe(infoHash)
+  expect(params(magnet).getAll('tr')).toEqual(tr)
+  say(`seeding it: same infohash ${infoHash.slice(0, 12)}…, announcing to ${tr.join(', ')}`)
+  if (http) {
+    await expect.poll(() => seeders(http, infoHash), { timeout: 90_000, intervals: [3_000] }).toBeGreaterThan(before)
+    say(`the tracker counts ${await seeders(http, infoHash)} seeders (was ${before})`)
+  }
+  await shell.seedStop(envelopeHash)
+}
+
 test('live: subscribe to the newsread bot, articles arrive by themselves, the bot answers', async () => {
   test.setTimeout(NEW_MS + 10 * 60_000)
   const shell = await launchShell({ extraEnv: { SHELL_TORRENT_OFFLINE: '0' } })
@@ -113,6 +144,20 @@ test('live: subscribe to the newsread bot, articles arrive by themselves, the bo
     await expect
       .poll(async () => (offers = (await shell.offers()).filter((o) => o.poster === BOT_EK)).length, { timeout: 30_000 })
       .toBeGreaterThan(0)
+    // The relay sends its backlog over a few seconds. Wait for it to stop
+    // growing, so the snapshot holds the newest -- the ones catch-up fetches.
+    let last = -1
+    await expect
+      .poll(
+        async () => {
+          const n = (offers = (await shell.offers()).filter((o) => o.poster === BOT_EK)).length
+          const settled = n === last
+          last = n
+          return settled
+        },
+        { timeout: 60_000, intervals: [3_000] }
+      )
+      .toBe(true)
     expect(byBot(await shell.feed({ limit: 500 }), 'article')).toHaveLength(0)
     say(`${offers.length} article offers waiting, none fetched (${offers.filter((o) => o.state === 'offered').length} offered)`)
 
@@ -129,6 +174,12 @@ test('live: subscribe to the newsread bot, articles arrive by themselves, the bo
     const opened = await shell.openThing(String(got[0]!.envelopeHash))
     expect(opened.error ?? null).toBeNull()
     say('opened one')
+
+    // ── Sharing one joins the bot's swarm: same infohash, same trackers. ───
+    // Any held one whose offer we saw: the newest may have been posted after.
+    const shared = offers.find((o) => got.some((g) => g.envelopeHash === o.envelopeHash))
+    expect(shared, 'an article held from an offer seen').toBeTruthy()
+    await seedJoinsSwarm(shell, String(shared!.envelopeHash), String(shared!.locator))
 
     // ── Tell the bot, privately; it answers privately. ─────────────────────
     await ask(shell, 'subscribe guardian')

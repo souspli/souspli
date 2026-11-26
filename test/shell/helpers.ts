@@ -202,6 +202,9 @@ export interface ShellHandle {
   seedStart(envelopeHash: string): Promise<Record<string, unknown>>
   seedStop(envelopeHash: string): Promise<Record<string, unknown>>
   seedStatus(): Promise<Record<string, unknown>[]>
+  /** What watchTransfer records once a magnet download admits, for a thing
+   *  held some other way (no swarm in CI, so no download completes). */
+  arrivedByMagnet(envelopeHash: string, magnet: string): Promise<void>
   /** Things a relay says exist that this library does not hold, and the press
    *  that fetches one. Nothing follows a pointer on its own. */
   offers(inGroup?: string): Promise<Record<string, unknown>[]>
@@ -582,6 +585,14 @@ export async function launchShell(opts: ShellLaunchOptions = {}): Promise<ShellH
         const s = (electron.app as unknown as { __shell: { seedStatus: () => Record<string, unknown>[] } }).__shell
         return s.seedStatus() as never
       }),
+    arrivedByMagnet: (envelopeHash: string, magnet: string) =>
+      app.evaluate(
+        async (electron, [h, m]) => {
+          const s = (electron.app as unknown as { __shell: { arrivedByMagnet: (h: string, m: string) => void } }).__shell
+          s.arrivedByMagnet(h!, m!)
+        },
+        [envelopeHash, magnet]
+      ),
     offers: (inGroup?: string) =>
       app.evaluate(async (electron, g) => {
         const s = (electron.app as unknown as { __shell: { offers: (g?: string) => Record<string, unknown>[] } })
