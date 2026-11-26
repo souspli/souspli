@@ -3771,7 +3771,11 @@ app.whenReady().then(async () => {
     // which routes magnets away before dispatching). Asking `supports` about
     // one therefore answers no, which would quietly make every pointer over
     // the inline cap unfollowable: exactly the case pointers exist for.
-    if (/^magnet:/i.test(l)) return infoHashOf(l) !== null
+    // infoHashOf answers '' (never null) when there is none, so check what it
+    // found: a v1 btih is 40 hex or 32 base32. Anything else could never
+    // download, and offering it would only spend a subscription's hourly
+    // allowance on a transfer startTransfer refuses.
+    if (/^magnet:/i.test(l)) return /^(?:[0-9a-f]{40}|[a-z2-7]{32})$/.test(infoHashOf(l))
     return /^(https?:|bundle:)/i.test(l) && transport.supports(l)
   }
 
