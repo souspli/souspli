@@ -797,6 +797,13 @@ export class Library {
       -- Feed names each relay key has used, kept after its offers are fetched
       -- or dropped, so a Subscribe dialog can still offer the choice. Bounded
       -- per poster in recordOffer.
+      -- The trackers named by the magnet a thing arrived by, so seeding it
+      -- later announces where that magnet's swarm is looking. Kept apart from
+      -- seeding: it is learned at arrival, long before anyone shares it.
+      CREATE TABLE IF NOT EXISTS thing_trackers (
+        envelope_hash TEXT PRIMARY KEY,
+        trackers      TEXT NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS poster_feeds (
         poster    TEXT NOT NULL,
         feed      TEXT NOT NULL,
@@ -1372,6 +1379,31 @@ export class Library {
 
   forgetSeeding(envelopeHash: string): void {
     this.db.prepare('DELETE FROM seeding WHERE envelope_hash = ?').run(envelopeHash)
+  }
+
+  /** The trackers the magnet a thing arrived by named; [] if none is known. */
+  trackersFor(envelopeHash: string): string[] {
+    const r = this.db.prepare('SELECT trackers FROM thing_trackers WHERE envelope_hash = ?').get(envelopeHash) as
+      | { trackers: string }
+      | undefined
+    if (!r) return []
+    try {
+      const v = JSON.parse(r.trackers) as unknown
+      return Array.isArray(v) ? v.filter((t): t is string => typeof t === 'string') : []
+    } catch {
+      return []
+    }
+  }
+
+  /** Remember them. The latest arrival wins; an empty list forgets. */
+  rememberTrackers(envelopeHash: string, trackers: string[]): void {
+    if (trackers.length === 0) {
+      this.db.prepare('DELETE FROM thing_trackers WHERE envelope_hash = ?').run(envelopeHash)
+      return
+    }
+    this.db
+      .prepare('INSERT OR REPLACE INTO thing_trackers (envelope_hash, trackers) VALUES (?,?)')
+      .run(envelopeHash, JSON.stringify(trackers))
   }
 
   /** Every signature over one manifest -- that is, every envelope naming it.
@@ -2312,6 +2344,7 @@ export class Library {
       // by the caller (deleteThing); this is the record that would otherwise
       // resume seeding a thing the human deleted, on the next start.
       this.db.prepare('DELETE FROM seeding WHERE envelope_hash = ?').run(envelopeHash)
+      this.db.prepare('DELETE FROM thing_trackers WHERE envelope_hash = ?').run(envelopeHash)
       this.db.prepare('DELETE FROM sealed_bundles WHERE envelope_hash = ?').run(envelopeHash)
     })()
     this.sealedEnc.delete(envelopeHash)

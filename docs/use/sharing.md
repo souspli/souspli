@@ -31,11 +31,14 @@ video, a photo set.
 
 - Nothing is seeded unless you ask, letter by letter. **Stop seeding** turns it off.
 - The link works while Souspli is running on a machine that seeds it.
+- A letter that came to you by a `magnet:` link is seeded to that link's own
+  trackers, so you join the swarm already serving it: same link, one more
+  source. Anything else is announced to the usual public trackers.
 - **File → Transfers…** shows downloads and seeds in both directions, including why
   a download is stuck ("found 2 peers, none have accepted a connection…").
 
-*Reveals:* your IP address to the BitTorrent DHT and to every peer, along with the
-fact that you hold this letter. A sealed letter stays encrypted; that you have it
+*Reveals:* your IP address to the BitTorrent DHT, to every peer and to the
+trackers it announces to, along with the fact that you hold this letter. A sealed letter stays encrypted; that you have it
 does not stay secret.
 
 ## 4. Post to relays

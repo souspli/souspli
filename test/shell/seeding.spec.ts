@@ -108,3 +108,61 @@ test('deleting a thing stops serving it', async () => {
     await shell.close()
   }
 })
+
+test("a thing that arrived by magnet is seeded to that magnet's trackers", async () => {
+  // A seed announcing only to webtorrent's default list is a swarm of its own:
+  // everyone following the publisher's magnet asks the publisher's trackers,
+  // and would never hear of it. Offline, nothing is announced -- what is
+  // checked is what WOULD be, which the magnet spells out.
+  const dir = mkdtempSync(join(tmpdir(), 'shell-seed-tr-'))
+  const tr = ['udp://tracker.example:6969/announce', 'http://tracker.example:6969/announce']
+  try {
+    let hash: string
+    let magnet: string
+    let tar: Uint8Array
+    {
+      const shell = await launchShell({ extraEnv: { SHELL_USER_DATA_DIR: dir } })
+      try {
+        const { outcome, tarBase64 } = await shell.compose(NAMETAG.toString('base64'), 'nametag')
+        hash = outcome.envelopeHash as string
+        tar = Buffer.from(tarBase64, 'base64')
+        const plain = (await shell.seedStart(hash)).magnet as string
+        expect(plain).not.toContain('tracker.example')
+        await shell.seedStop(hash)
+
+        const arrived = `magnet:?xt=urn:btih:${'c'.repeat(40)}&dn=x.thing${tr.map((t) => `&tr=${encodeURIComponent(t)}`).join('')}&tr=file%3A%2F%2F%2Fetc%2Fpasswd`
+        await shell.arrivedByMagnet(hash, arrived)
+        const started = await shell.seedStart(hash)
+        expect(started.error ?? null).toBeNull()
+        magnet = started.magnet as string
+        const named = new URLSearchParams(magnet.slice('magnet:?'.length)).getAll('tr')
+        // Its own trackers, and no others: not the defaults, and not a scheme
+        // no tracker speaks.
+        expect(named).toEqual(tr)
+        // Same bytes, same name: the infohash does not depend on trackers.
+        expect(magnet.match(/btih:([0-9a-f]{40})/i)![1]).toBe(plain.match(/btih:([0-9a-f]{40})/i)![1])
+      } finally {
+        await shell.app.close()
+      }
+    }
+    // The resumed seed still announces there.
+    const again = await launchShell({ extraEnv: { SHELL_USER_DATA_DIR: dir } })
+    try {
+      await expect.poll(async () => (await again.seedStatus()).length, { timeout: 20_000 }).toBe(1)
+      expect((await again.seedStatus())[0]!.magnet).toBe(magnet)
+      // Deleting forgets them along with the thing.
+      await again.app.evaluate(async (electron, h) => {
+        const s = (electron.app as unknown as { __shell: { deleteThing: (x: string) => unknown } }).__shell
+        s.deleteThing(h)
+      }, hash)
+      expect(await again.seedStatus()).toEqual([])
+      // The same bytes handed over again, by a route that is not a magnet.
+      expect((await again.ingest(tar)).envelopeHash).toBe(hash)
+      expect((await again.seedStart(hash)).magnet as string).not.toContain('tracker.example')
+    } finally {
+      await again.close()
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

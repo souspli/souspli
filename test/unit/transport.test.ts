@@ -7,6 +7,7 @@ import {
   type Transport
 } from '../../src/shell/transport/index.js'
 import { hash, toHex } from '../../src/format/index.js'
+import { trackersOf } from '../../src/shell/torrent/index.js'
 
 // The TransportService is the fetch BOUNDARY: it dispatches by scheme, enforces
 // the size cap and timeout as a backstop (a transport is not trusted to
@@ -77,5 +78,26 @@ describe('TransportService', () => {
       })
     )
     await expect(svc.fetch('bad:x')).rejects.toThrow(/boom/)
+  })
+})
+
+describe('trackersOf', () => {
+  const xt = `xt=urn:btih:${'a'.repeat(40)}`
+  it("reads a magnet's tr= list in order, decoded and deduplicated", () => {
+    const m = `magnet:?${xt}&dn=a.thing&tr=udp%3A%2F%2Ft.example%3A6969%2Fannounce&tr=http://t.example:6969/announce&TR=udp%3A%2F%2Ft.example%3A6969%2Fannounce&ws=https%3A%2F%2Fw.example%2Fa`
+    expect(trackersOf(m)).toEqual(['udp://t.example:6969/announce', 'http://t.example:6969/announce'])
+  })
+  it('keeps only schemes a tracker speaks', () => {
+    const m = `magnet:?${xt}&tr=file%3A%2F%2F%2Fetc%2Fpasswd&tr=javascript%3Aalert(1)&tr=wss%3A%2F%2Ft.example&tr=https%3A%2F%2Ft.example%2Fa&tr=udp%3A%2F%2F&tr=%E0%A4%A`
+    expect(trackersOf(m)).toEqual(['wss://t.example', 'https://t.example/a'])
+  })
+  it('is bounded in count and length', () => {
+    const many = Array.from({ length: 20 }, (_, i) => `&tr=udp%3A%2F%2Ft${i}.example%3A1`).join('')
+    expect(trackersOf(`magnet:?${xt}${many}`)).toHaveLength(8)
+    expect(trackersOf(`magnet:?${xt}&tr=udp://${'x'.repeat(200)}:1`)).toEqual([])
+  })
+  it('answers nothing for a magnet with no trackers, or for something else', () => {
+    expect(trackersOf(`magnet:?${xt}`)).toEqual([])
+    expect(trackersOf('https://example.com/?tr=udp://t.example:1')).toEqual([])
   })
 })

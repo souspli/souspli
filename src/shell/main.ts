@@ -32,7 +32,7 @@ import { suggestedRelay, welcomeForumBundle } from './welcome/community.js'
 import { applyPins, pinsOf, type Pins } from './library/pins.js'
 import { mountThing, type MountedThing } from './mount/index.js'
 import { TransportService, FileTransport, HttpTransport, SeedTransport } from './transport/index.js'
-import { TorrentService, displayNameOf, infoHashOf } from './torrent/index.js'
+import { TorrentService, displayNameOf, infoHashOf, trackersOf } from './torrent/index.js'
 import { NostrService, buildThingEvent, buildAnonymousThingEvent, MAX_INLINE_BUNDLE, TAG, type ParsedThingEvent } from './nostr/index.js'
 import { NOSTR_ENC_SCHEME, SEALED_TYPE, buildSealedEvent } from './nostr/event.js'
 import { NamingService, DirectResolver, EnsResolver, NostrResolver, type EnsClient } from './naming/index.js'
@@ -458,6 +458,7 @@ interface ShellSurface {
   exportThing?: (envelopeHash: string) => { tarBase64: string; filename: string } | { error: string }
   exportBase64?: (envelopeHash: string) => { base64: string; bytes: number } | { error: string }
   seedStart?: (envelopeHash: string) => Promise<Record<string, unknown>>
+  arrivedByMagnet?: (envelopeHash: string, magnet: string) => void
   seedStop?: (envelopeHash: string) => Record<string, unknown>
   seedStatus?: () => Record<string, unknown>[]
   /** Cast a vote on a thing (+1 / -1, or 0 to take it back), replacing your previous one. */
@@ -3310,7 +3311,7 @@ app.whenReady().then(async () => {
         pushTransfers()
       }
     })
-    void watchTransfer(id)
+    void watchTransfer(id, magnet)
     pushTransfers()
     return { status: 'started', transferId: id, infoHash }
   }
@@ -3318,7 +3319,7 @@ app.whenReady().then(async () => {
   /** Wait for a download to finish, then put its bytes through admission.
    *  Deliberately not awaited by the caller -- that is what makes it a
    *  background transfer rather than a long fetch. */
-  async function watchTransfer(id: string): Promise<void> {
+  async function watchTransfer(id: string, magnet: string): Promise<void> {
     const torrent = seeder.torrentFor(id)
     if (!torrent) return
     const done = await new Promise<boolean>((resolve) => {
@@ -3352,6 +3353,7 @@ app.whenReady().then(async () => {
         if (owed?.owedAuthor) void drainSubscriptions()
         return
       }
+      if (typeof outcome.envelopeHash === 'string') arrivedByMagnet(outcome.envelopeHash, magnet)
       // It arrived and it admitted: the intent is discharged, and the partial
       // file is redundant now the bytes are in the CAS and the seed store.
       library.forgetTransfer(id)
@@ -3364,6 +3366,13 @@ app.whenReady().then(async () => {
       seeder.setDownloadState(id, 'failed', (e as Error).message)
       pushTransfers()
     }
+  }
+
+  /** Where this magnet's swarm is, kept for if the human later shares what
+   *  it brought: the seed then announces to the same trackers and joins that
+   *  swarm, instead of one nobody holding the magnet would find. */
+  function arrivedByMagnet(envelopeHash: string, magnet: string): void {
+    library.rememberTrackers(envelopeHash, trackersOf(magnet))
   }
 
   function cancelTransfer(id: unknown): Record<string, unknown> {
@@ -3477,11 +3486,12 @@ app.whenReady().then(async () => {
   /** Start serving a thing to peers, and remember that we are.
    *
    *  Seeds the ORIGINAL admitted tar -- the same bytes Share hands out -- so
-   *  the magnet resolves to exactly what was signed. */
+   *  the magnet resolves to exactly what was signed. A thing that arrived by
+   *  magnet is announced to that magnet's trackers (see TorrentService.start). */
   async function startSeeding(envelopeHash: string): Promise<Record<string, unknown>> {
     const r = exportThing(envelopeHash)
     if ('error' in r) return { error: r.error }
-    const started = await seeder.start(envelopeHash, r.tar, r.filename)
+    const started = await seeder.start(envelopeHash, r.tar, r.filename, library.trackersFor(envelopeHash))
     if ('error' in started) return { error: started.error }
     library.rememberSeeding(envelopeHash, started.magnet, Date.now())
     notifyFeedChanged()
@@ -4533,6 +4543,9 @@ app.whenReady().then(async () => {
     return { outcome, tarBase64: bytesToBase64(tar) }
   }
   shell.seedStart = (h) => startSeeding(h)
+  // No swarm in CI, so no magnet download completes there: this is the step
+  // watchTransfer takes once one does, for a thing held some other way.
+  shell.arrivedByMagnet = (h, magnet) => arrivedByMagnet(h, magnet)
   shell.seedStop = (h) => stopSeeding(h)
   shell.seedStatus = () => seedingStatus()
   shell.vote = (h, dir) => castVote(h, dir)
@@ -4726,7 +4739,7 @@ app.whenReady().then(async () => {
         record({ type: 'transfer-resume-failed', id: t.id, reason: started.error })
         continue
       }
-      void watchTransfer(t.id)
+      void watchTransfer(t.id, t.magnet)
     }
     pushTransfers()
   })()
