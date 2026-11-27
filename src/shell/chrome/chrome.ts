@@ -200,6 +200,9 @@ interface OfferRow {
   feed?: string | null
   /** A name for the POSTING key, when a public letter held here binds it. */
   posterName?: string | null
+  /** The author that key speaks for, when they can be subscribed to. */
+  posterAuthor?: { scheme: string; key: string } | null
+  posterSubscribed?: boolean
 }
 interface KnownTypeEntry {
   key: string
@@ -1819,6 +1822,60 @@ async function fetchManyOffers(): Promise<void> {
   }
 }
 
+/** How many waiting offers from one author before the feed mentions subscribing. */
+const SUBSCRIBE_PROMPT_AT = 3
+const SUB_LATER_KEY = 'sh-subscribe-later:'
+
+/** One line above a pile of one author's offers: you can stop pressing Fetch.
+ *
+ *  Subscribing already exists, in People, where nobody working through a
+ *  backlog is looking. Shown only for an author main says can be subscribed to
+ *  (their own public letter binds the key that posted these) and is not
+ *  already, for whoever has the most waiting; dismissed per author, for good.
+ *  It opens the same dialog People does -- this line fetches nothing itself. */
+function subscribePrompt(offers: OfferRow[]): HTMLElement | null {
+  const piles = new Map<string, { o: OfferRow; n: number }>()
+  for (const o of offers) {
+    if (o.state !== 'offered' || !o.posterAuthor || o.posterSubscribed) continue
+    const pile = piles.get(o.poster)
+    if (pile) pile.n++
+    else piles.set(o.poster, { o, n: 1 })
+  }
+  const later = (poster: string): boolean => {
+    try {
+      return localStorage.getItem(SUB_LATER_KEY + poster) === '1'
+    } catch {
+      return false
+    }
+  }
+  const top = [...piles.values()].filter((p) => p.n >= SUBSCRIBE_PROMPT_AT && !later(p.o.poster)).sort((a, b) => b.n - a.n)[0]
+  if (!top?.o.posterAuthor) return null
+  const author = top.o.posterAuthor
+  const name = top.o.posterName ?? short(`0x${author.key}`)
+
+  const line = el('div', 'sh-offers-subscribe')
+  line.setAttribute('data-testid', 'offers-subscribe-prompt')
+  line.setAttribute('data-author-key', author.key)
+  const text = el('span', 'sh-offers-subscribe-text', `${top.n} of these were posted by ${name}.`)
+  const sub = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Subscribe…')
+  sub.setAttribute('data-testid', 'offers-subscribe')
+  sub.title = `Fetch what ${name} posts as it arrives, without a press each time. Opens the choices; nothing is fetched until you confirm.`
+  sub.addEventListener('click', () => openSubscribeModal(author.scheme, author.key, name, () => void refreshFeed()))
+  const no = el('button', 'evm-btn evm-btn--ghost evm-btn--sm sh-offers-subscribe-no', '×')
+  no.setAttribute('data-testid', 'offers-subscribe-dismiss')
+  no.title = `Do not suggest this for ${name} again. Subscribing stays available in People.`
+  no.addEventListener('click', () => {
+    try {
+      localStorage.setItem(SUB_LATER_KEY + top.o.poster, '1')
+    } catch {
+      /* private mode: suggested again next time */
+    }
+    void refreshFeed()
+  })
+  line.append(text, sub, no)
+  return line
+}
+
 /** A thing fetched from an offer row a moment ago, drawn where the offer was.
  *
  *  It is a real feed row when the feed has it (signed, authored, titled); when
@@ -2001,6 +2058,8 @@ async function refreshFeed(): Promise<void> {
       title.append(many)
     }
     feedTop.append(title)
+    const prompt = subscribePrompt(offers)
+    if (prompt) feedTop.append(prompt)
     const held = new Map(rows.map((r) => [r.envelopeHash, r]))
     const listed = [...offers.map((o) => ({ o, here: false })), ...arrived.map((o) => ({ o, here: true }))].sort(
       (a, b) => b.o.seenAt - a.o.seenAt
