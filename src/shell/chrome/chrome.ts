@@ -1759,8 +1759,8 @@ function offerItem(o: OfferRow): HTMLElement {
     pressedOffers.set(o.envelopeHash, o)
     fetching(null)
     const r = await shell.fetchOffer(o.envelopeHash)
+    // A failure stays among the pressed, so its row is not folded out of sight.
     if (r.error || r.status === 'invalid') {
-      pressedOffers.delete(o.envelopeHash)
       showText(String(r.error ?? r.reason ?? 'could not fetch it'), 'danger')
     }
     await refreshFeed()
@@ -1786,6 +1786,37 @@ function offerItem(o: OfferRow): HTMLElement {
     wrap.append(why)
   }
   return wrap
+}
+
+/** How many quiet offers the feed shows before folding the rest away. */
+const OFFERS_SHOWN = 5
+/** How many "Fetch N" starts at a press. */
+const FETCH_MANY = 10
+let offersExpanded = false
+/** Held across redraws: the feed is rebuilt as each fetch starts, and a
+ *  rebuilt button must not be pressable into a second batch. */
+let fetchingMany = false
+
+/** Press Fetch on the newest waiting offers, newest first.
+ *
+ *  Each goes through fetchOffer like a row's own button, so main checks every
+ *  one again; a magnet returns once its transfer has started, so they run side
+ *  by side and are watched in their rows. One that fails stays an offer and
+ *  says why on its row -- a batch is not stopped by it. */
+async function fetchManyOffers(): Promise<void> {
+  if (fetchingMany) return
+  fetchingMany = true
+  try {
+    const waiting = (await shell.offers()).filter((o) => o.state === 'offered').slice(0, FETCH_MANY)
+    for (const o of waiting) pressedOffers.set(o.envelopeHash, o)
+    await refreshFeed()
+    for (const o of waiting) {
+      await shell.fetchOffer(o.envelopeHash).catch(() => undefined)
+    }
+  } finally {
+    fetchingMany = false
+    await refreshFeed()
+  }
 }
 
 /** A thing fetched from an offer row a moment ago, drawn where the offer was.
@@ -1952,15 +1983,50 @@ async function refreshFeed(): Promise<void> {
   const offered = new Set(offers.map((o) => o.envelopeHash))
   const arrived = [...pressedOffers.values()].filter((o) => !offered.has(o.envelopeHash))
   if (offers.length > 0 || arrived.length > 0) {
-    const title = el('div', 'sh-feed-title', `Offered · ${offers.length}`)
-    title.setAttribute('data-testid', 'feed-offers-title')
-    title.title = 'Letters a relay says exist. Nothing has been downloaded — pressing Fetch is what contacts anybody.'
+    const title = el('div', 'sh-feed-title sh-feed-head')
+    const label = el('span', undefined, `Offered · ${offers.length}`)
+    label.setAttribute('data-testid', 'feed-offers-title')
+    label.title = 'Letters a relay says exist. Nothing has been downloaded — pressing Fetch is what contacts anybody.'
+    title.append(label)
+    // A backlog is pressed through in batches, not one row at a time. Still a
+    // press, and it says how many: each one contacts the hosts its row names.
+    const waiting = offers.filter((o) => o.state === 'offered').length
+    if (waiting > 1) {
+      const n = Math.min(waiting, FETCH_MANY)
+      const many = el('button', 'evm-btn evm-btn--ghost evm-btn--sm sh-offers-many', fetchingMany ? 'Fetching…' : `Fetch ${n}`) as HTMLButtonElement
+      many.setAttribute('data-testid', 'offers-fetch-many')
+      many.title = `Fetch the newest ${n} at once. Each contacts the hosts its row names, exactly as its own Fetch button would.`
+      many.disabled = fetchingMany
+      many.addEventListener('click', () => void fetchManyOffers())
+      title.append(many)
+    }
     feedTop.append(title)
     const held = new Map(rows.map((r) => [r.envelopeHash, r]))
     const listed = [...offers.map((o) => ({ o, here: false })), ...arrived.map((o) => ({ o, here: true }))].sort(
       (a, b) => b.o.seenAt - a.o.seenAt
     )
-    for (const { o, here } of listed) feedTop.append(here ? arrivedItem(o, held.get(o.envelopeHash)) : offerItem(o))
+    // Folded to the newest few, so a long backlog does not push the feed off
+    // the bottom of the pane. Anything in motion is always shown: a fetch in
+    // flight, one that failed after a press here, and what has arrived.
+    let quiet = 0
+    let folded = 0
+    for (const { o, here } of listed) {
+      const busy = here || o.state === 'fetching' || pressedOffers.has(o.envelopeHash)
+      if (!busy && !offersExpanded && ++quiet > OFFERS_SHOWN) {
+        folded++
+        continue
+      }
+      feedTop.append(here ? arrivedItem(o, held.get(o.envelopeHash)) : offerItem(o))
+    }
+    if (folded > 0 || (offersExpanded && offers.length > OFFERS_SHOWN)) {
+      const more = el('button', 'evm-btn evm-btn--ghost evm-btn--sm sh-offers-more', offersExpanded ? 'Show fewer' : `Show ${folded} more`)
+      more.setAttribute('data-testid', 'offers-more')
+      more.addEventListener('click', () => {
+        offersExpanded = !offersExpanded
+        void refreshFeed()
+      })
+      feedTop.append(more)
+    }
   }
   const head = el('div', 'sh-feed-title sh-feed-head')
   const scopeLabel = feedScope === 'mine' ? 'By you' : feedScope === 'to' ? 'To you' : feedScope === 'replies' ? 'Replies' : 'Feed'

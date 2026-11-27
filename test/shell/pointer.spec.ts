@@ -326,6 +326,38 @@ test('a magnet fetch is watched in its row, and cancelling gives the offer back'
     .toBe('Fetch')
 })
 
+test('a backlog folds to the newest few, and Fetch N presses a batch', async () => {
+  const things: { hash: string; bytes: Buffer }[] = []
+  for (let i = 0; i < 8; i++) {
+    const t = await thing()
+    things.push(t)
+    routes.set(`/t${i}.thing`, t.bytes)
+    await advertise({ hash: t.hash, locator: `${base}/t${i}.thing` })
+  }
+  await expect.poll(async () => (await shell.offers()).length, { timeout: 15_000 }).toBe(8)
+  const count = (testid: string): Promise<number> => chromeEval<number>(`document.querySelectorAll('[data-testid=${testid}]').length`)
+
+  // Five shown, the rest behind a button that says how many.
+  await expect.poll(() => count('offer-item'), { timeout: 15_000 }).toBe(5)
+  expect(await chromeEval<string>(`document.querySelector('[data-testid=feed-offers-title]').textContent`)).toBe('Offered · 8')
+  expect(await chromeEval<string>(`document.querySelector('[data-testid=offers-more]').textContent`)).toBe('Show 3 more')
+  await chromeEval(`document.querySelector('[data-testid=offers-more]').click()`)
+  await expect.poll(() => count('offer-item'), { timeout: 15_000 }).toBe(8)
+  await chromeEval(`document.querySelector('[data-testid=offers-more]').click()`)
+  await expect.poll(() => count('offer-item'), { timeout: 15_000 }).toBe(5)
+  expect(hits, 'folding and unfolding fetched nothing').toEqual([])
+
+  // The batch press: all eight (fewer than a batch), each landing as an
+  // arrived row -- shown even though the list is folded.
+  expect(await chromeEval<string>(`document.querySelector('[data-testid=offers-fetch-many]').textContent`)).toBe('Fetch 8')
+  await chromeEval(`document.querySelector('[data-testid=offers-fetch-many]').click()`)
+  await expect.poll(async () => (await shell.feed({ limit: 200 })).length, { timeout: 30_000 }).toBe(8)
+  await expect.poll(() => count('offer-arrived'), { timeout: 15_000 }).toBe(8)
+  expect(await count('offer-item')).toBe(0)
+  expect(await shell.offers()).toEqual([])
+  expect(hits.slice().sort()).toEqual(things.map((_, i) => `/t${i}.thing`))
+})
+
 test('a magnet that names no usable infohash is not an offer', async () => {
   // It could never download -- startTransfer refuses it -- so recording it
   // would only put a dead row in front of a person, or, for a subscribed
