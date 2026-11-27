@@ -28,7 +28,8 @@ Kind **3400** (NIP-01 regular range: stored by relays).
     ["thing-group", "<forum root>"],  // which forum, if any
     ["thing-reply", "<hash>"],        // threading, when it is a reply
     ["thing-feed", "<feed id>"],      // which of a publisher's feeds, if it has several
-    ["thing-fetch", "magnet:…"]       // only when content is a pointer
+    ["thing-fetch", "magnet:…"]       // only when content is a pointer,
+    ["thing-title", "<one line>"]     // pointer only: what the poster says it is called
   ]
 }
 ```
@@ -43,6 +44,12 @@ have established meanings over *Nostr* ids. Letter hashes are a different namesp
 - A larger letter is posted as a **pointer**: `content` is empty, `x` names the hash
   and `thing-fetch` carries a locator. Posting one requires the letter to be seeded
   first — a locator is only honest if something is serving it.
+- A pointer may carry `thing-title`, so the offer it becomes can say what it is
+  about before anyone fetches it. It is the *poster's* claim about bytes the reader
+  has not seen: a reader sanitizes it like any title (one line, 80 characters, no
+  control or bidi characters, no check marks), shows it as a claim, and replaces it
+  with the letter's own title once the letter is held. A tag over 512 characters is
+  ignored. An inline event has no use for the tag and a reader ignores it there.
 - A sealed letter is posted differently: see below. It is always inline, never a
   pointer, so anything over the cap travels as a file.
 

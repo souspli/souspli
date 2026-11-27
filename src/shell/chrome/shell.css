@@ -443,6 +443,7 @@ body {
   white-space: nowrap;
 }
 .sh-offer-via { color: var(--evm-text-3); }
+.sh-offer-called { font-style: italic; }
 /* Fetching: the row is its own progress bar. Filled to the fraction arrived
    once the size is known; before that there is nothing to measure, so a band
    sweeps instead of a bar sitting at a 0% that would claim a start. */

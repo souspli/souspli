@@ -198,6 +198,8 @@ interface OfferRow {
   transferId?: string | null
   /** The event's feed tag: which of a publisher's feeds. The poster's hint. */
   feed?: string | null
+  /** What the POSTER says it is called. Sanitized in main; still only a claim. */
+  title?: string | null
   /** A name for the POSTING key, when a public letter held here binds it. */
   posterName?: string | null
   /** The author that key speaks for, when they can be subscribed to. */
@@ -1714,6 +1716,17 @@ function offerItem(o: OfferRow): HTMLElement {
   fetchBtn.setAttribute('data-testid', 'offer-fetch')
   line.append(fetchBtn)
   wrap.append(line)
+
+  // What the poster says it is called. The same secondary line a letter's own
+  // title gets, but italic like the rest of an offer's claims and saying whose
+  // word it is: a held letter's title is its author's, this is only the
+  // poster's, about bytes nobody here has read.
+  if (o.title) {
+    const called = el('div', 'sh-feed-called sh-offer-called', o.title)
+    called.setAttribute('data-testid', 'offer-title')
+    called.title = 'What whoever posted this says it is called. Nobody here has read it — the letter’s own title shows once it is fetched.'
+    wrap.append(called)
+  }
 
   let transferId: string | null = null
   const paint = (d: DownloadRow | undefined): void => {
@@ -3574,7 +3587,8 @@ function forumPostBody(
       state: (row.offerState as OfferRow['state']) ?? 'offered',
       reason: String(row.offerReason ?? ''),
       seenAt: Number(row.receivedAt ?? 0),
-      transferId: typeof row.offerTransferId === 'string' ? row.offerTransferId : null
+      transferId: typeof row.offerTransferId === 'string' ? row.offerTransferId : null,
+      title: typeof row.offerTitle === 'string' ? row.offerTitle : null
     })
     const v = row.votes as { score: number; tribeUp: number; tribeDown: number; up: number; down: number }
     const score = el('span', 'sh-forum-score', v.score > 0 ? `+${v.score}` : String(v.score))
