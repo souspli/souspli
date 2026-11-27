@@ -325,9 +325,9 @@ test('a pile of one author’s offers suggests subscribing, from the feed', asyn
   // Subscribed, so there is nothing left to suggest; the stranger's still wait.
   await expect.poll(() => chromeEval<boolean>(`!!${prompt}`), { timeout: 15_000 }).toBe(false)
   // The line goes as soon as the subscription exists; the catch-up it started
-  // may still be landing, so the count is waited for.
-  await expect.poll(async () => (await shell.offers()).filter((o) => o.state === 'offered').length, { timeout: 15_000 }).toBe(3)
-  expect((await shell.offers()).every((o) => o.poster !== pub.ek), 'only the stranger’s are left').toBe(true)
+  // may still be starting or landing, so its end is waited for.
+  await expect.poll(async () => (await shell.offers()).filter((o) => o.poster === pub.ek).length, { timeout: 15_000 }).toBe(0)
+  expect((await shell.offers()).filter((o) => o.state === 'offered').length, 'the stranger’s still wait').toBe(3)
 })
 
 test('the suggestion can be dismissed for an author, and stays dismissed', async () => {
