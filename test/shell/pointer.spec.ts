@@ -76,6 +76,7 @@ async function advertise(opts: {
   locator: string
   type?: string
   group?: string
+  title?: string
 }): Promise<void> {
   relay.broadcast(
     await buildThingEvent(
@@ -84,6 +85,7 @@ async function advertise(opts: {
         type: opts.type ?? 'nametag',
         fetchLocator: opts.locator,
         ...(opts.group ? { group: opts.group } : {}),
+        ...(opts.title ? { title: opts.title } : {}),
         createdAt: Math.floor(Date.now() / 1000)
       },
       schnorr.utils.randomSecretKey()
@@ -324,6 +326,64 @@ test('a magnet fetch is watched in its row, and cancelling gives the offer back'
   await expect
     .poll(() => chromeEval<string>(`${row(t.hash)}.querySelector('[data-testid=offer-fetch]').textContent`), { timeout: 15_000 })
     .toBe('Fetch')
+})
+
+test('a pointer’s title is shown as the poster’s claim, sanitized, and gives way to the letter’s own', async () => {
+  const t = await thing()
+  routes.set('/big.thing', t.bytes)
+  // A check mark is the chrome's word for VERIFIED, and a bidi override can
+  // reorder a row: neither survives, exactly as in a held letter's title.
+  await advertise({ hash: t.hash, locator: `${base}/big.thing`, title: '✓ verified:‮ New York bans AI toys\nsecond line' })
+  await expect.poll(() => chromeEval<boolean>(`!!${row(t.hash)}`), { timeout: 15_000 }).toBe(true)
+
+  expect((await offerFor(t.hash))!.title).toBe('verified: New York bans AI toys')
+  const shown = `${row(t.hash)}.querySelector('[data-testid=offer-title]')`
+  expect(await chromeEval<string>(`${shown}.textContent`)).toBe('verified: New York bans AI toys')
+  expect(await chromeEval<string>(`${shown}.title`)).toMatch(/whoever posted this says/i)
+  expect(hits, 'a title fetched nothing').toEqual([])
+
+  // An absurdly long tag is ignored whole; the offer still stands, untitled.
+  const u = await thing()
+  await advertise({ hash: u.hash, locator: `${base}/u.thing`, title: 'x'.repeat(513) })
+  await expect.poll(async () => (await offerFor(u.hash))?.state, { timeout: 15_000 }).toBe('offered')
+  expect((await offerFor(u.hash))!.title).toBeNull()
+
+  // Fetched, the claim is gone with the offer: the row is the letter's own.
+  await shell.fetchOffer(t.hash)
+  await expect.poll(async () => (await shell.feed({ limit: 200 })).length, { timeout: 15_000 }).toBe(1)
+  expect(await offerFor(t.hash)).toBeUndefined()
+})
+
+test('a backlog folds to the newest few, and Fetch N presses a batch', async () => {
+  const things: { hash: string; bytes: Buffer }[] = []
+  for (let i = 0; i < 8; i++) {
+    const t = await thing()
+    things.push(t)
+    routes.set(`/t${i}.thing`, t.bytes)
+    await advertise({ hash: t.hash, locator: `${base}/t${i}.thing` })
+  }
+  await expect.poll(async () => (await shell.offers()).length, { timeout: 15_000 }).toBe(8)
+  const count = (testid: string): Promise<number> => chromeEval<number>(`document.querySelectorAll('[data-testid=${testid}]').length`)
+
+  // Five shown, the rest behind a button that says how many.
+  await expect.poll(() => count('offer-item'), { timeout: 15_000 }).toBe(5)
+  expect(await chromeEval<string>(`document.querySelector('[data-testid=feed-offers-title]').textContent`)).toBe('Offered · 8')
+  expect(await chromeEval<string>(`document.querySelector('[data-testid=offers-more]').textContent`)).toBe('Show 3 more')
+  await chromeEval(`document.querySelector('[data-testid=offers-more]').click()`)
+  await expect.poll(() => count('offer-item'), { timeout: 15_000 }).toBe(8)
+  await chromeEval(`document.querySelector('[data-testid=offers-more]').click()`)
+  await expect.poll(() => count('offer-item'), { timeout: 15_000 }).toBe(5)
+  expect(hits, 'folding and unfolding fetched nothing').toEqual([])
+
+  // The batch press: all eight (fewer than a batch), each landing as an
+  // arrived row -- shown even though the list is folded.
+  expect(await chromeEval<string>(`document.querySelector('[data-testid=offers-fetch-many]').textContent`)).toBe('Fetch 8')
+  await chromeEval(`document.querySelector('[data-testid=offers-fetch-many]').click()`)
+  await expect.poll(async () => (await shell.feed({ limit: 200 })).length, { timeout: 30_000 }).toBe(8)
+  await expect.poll(() => count('offer-arrived'), { timeout: 15_000 }).toBe(8)
+  expect(await count('offer-item')).toBe(0)
+  expect(await shell.offers()).toEqual([])
+  expect(hits.slice().sort()).toEqual(things.map((_, i) => `/t${i}.thing`))
 })
 
 test('a magnet that names no usable infohash is not an offer', async () => {

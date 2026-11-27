@@ -2479,6 +2479,7 @@ app.whenReady().then(async () => {
         offerState: o.state,
         offerReason: o.reason,
         offerTransferId: o.transferId,
+        offerTitle: o.title,
         locator: o.locator,
         poster: o.poster,
         relayUrl: o.relayUrl,
@@ -3613,6 +3614,9 @@ app.whenReady().then(async () => {
         inGroup: ev.group,
         replyTo: ev.replyTo,
         feed: feedTagOf(ev),
+        // Sanitized before it is stored, like a letter's own title: it is a
+        // stranger's text on its way into trusted chrome.
+        title: ev.title ? sanitizeTitle(ev.title) : null,
         now: Date.now()
       })
       if (noted) notifyFeedChanged()
@@ -3920,18 +3924,35 @@ app.whenReady().then(async () => {
     // Who the posting key belongs to, when a public letter held here binds it
     // (Author.ek): a name for the row in place of a locator nobody can read.
     // Still the POSTER -- who wrote the thing is unknown until it is fetched.
-    const names = new Map<string, string | null>()
-    const nameOf = (poster: string): string | null => {
-      if (!names.has(poster)) {
-        const author = library.authorOfEncKey(poster)
-        names.set(
-          poster,
-          author ? (library.petname(author.scheme, author.key)?.name ?? library.selfName(author.scheme, author.key) ?? null) : null
-        )
-      }
-      return names.get(poster) ?? null
+    //
+    // And whether that author can be subscribed to, so the chrome can say so
+    // beside a pile of their offers: only when this key is the one their
+    // newest public letter binds, which is the key a subscription would watch.
+    interface Poster {
+      name: string | null
+      author: { scheme: string; key: string } | null
+      subscribed: boolean
     }
-    return library.offers(q).map((o) => ({ ...o, posterName: nameOf(o.poster) }))
+    const posters = new Map<string, Poster>()
+    const posterOf = (poster: string): Poster => {
+      let p = posters.get(poster)
+      if (!p) {
+        const author = library.authorOfEncKey(poster)
+        const enc = author ? library.encKeyFor(author.scheme, author.key) : null
+        const mine = !!author && author.scheme === keyring.signer.scheme && author.key === myKeyHex()
+        p = {
+          name: author ? (library.petname(author.scheme, author.key)?.name ?? library.selfName(author.scheme, author.key) ?? null) : null,
+          author: author && !mine && enc?.scheme === NOSTR_ENC_SCHEME && enc.key === poster ? author : null,
+          subscribed: library.subscriptionForPoster(poster) !== null
+        }
+        posters.set(poster, p)
+      }
+      return p
+    }
+    return library.offers(q).map((o) => {
+      const p = posterOf(o.poster)
+      return { ...o, posterName: p.name, posterAuthor: p.author, posterSubscribed: p.subscribed }
+    })
   }
 
   /** Fetch an offered thing. THE PRESS: nothing calls this on its own, except
@@ -4033,7 +4054,8 @@ app.whenReady().then(async () => {
       {
         envelopeHash,
         type: row.type,
-        ...(inline ? { bundle: exported.tar } : { fetchLocator: locator! }),
+        // A pointer says what it points at, since the row it becomes cannot.
+        ...(inline ? { bundle: exported.tar } : { fetchLocator: locator!, ...(row.title ? { title: row.title } : {}) }),
         // `thing-group` is which FORUM this belongs to. A thing's own chain
         // path is a different fact entirely -- it says which line of versions
         // this is -- and tagging an event with it would put every amended

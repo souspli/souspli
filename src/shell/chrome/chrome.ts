@@ -198,8 +198,13 @@ interface OfferRow {
   transferId?: string | null
   /** The event's feed tag: which of a publisher's feeds. The poster's hint. */
   feed?: string | null
+  /** What the POSTER says it is called. Sanitized in main; still only a claim. */
+  title?: string | null
   /** A name for the POSTING key, when a public letter held here binds it. */
   posterName?: string | null
+  /** The author that key speaks for, when they can be subscribed to. */
+  posterAuthor?: { scheme: string; key: string } | null
+  posterSubscribed?: boolean
 }
 interface KnownTypeEntry {
   key: string
@@ -1712,6 +1717,17 @@ function offerItem(o: OfferRow): HTMLElement {
   line.append(fetchBtn)
   wrap.append(line)
 
+  // What the poster says it is called. The same secondary line a letter's own
+  // title gets, but italic like the rest of an offer's claims and saying whose
+  // word it is: a held letter's title is its author's, this is only the
+  // poster's, about bytes nobody here has read.
+  if (o.title) {
+    const called = el('div', 'sh-feed-called sh-offer-called', o.title)
+    called.setAttribute('data-testid', 'offer-title')
+    called.title = 'What whoever posted this says it is called. Nobody here has read it — the letter’s own title shows once it is fetched.'
+    wrap.append(called)
+  }
+
   let transferId: string | null = null
   const paint = (d: DownloadRow | undefined): void => {
     wrap.setAttribute('data-download-state', d?.state ?? 'starting')
@@ -1759,8 +1775,8 @@ function offerItem(o: OfferRow): HTMLElement {
     pressedOffers.set(o.envelopeHash, o)
     fetching(null)
     const r = await shell.fetchOffer(o.envelopeHash)
+    // A failure stays among the pressed, so its row is not folded out of sight.
     if (r.error || r.status === 'invalid') {
-      pressedOffers.delete(o.envelopeHash)
       showText(String(r.error ?? r.reason ?? 'could not fetch it'), 'danger')
     }
     await refreshFeed()
@@ -1786,6 +1802,91 @@ function offerItem(o: OfferRow): HTMLElement {
     wrap.append(why)
   }
   return wrap
+}
+
+/** How many quiet offers the feed shows before folding the rest away. */
+const OFFERS_SHOWN = 5
+/** How many "Fetch N" starts at a press. */
+const FETCH_MANY = 10
+let offersExpanded = false
+/** Held across redraws: the feed is rebuilt as each fetch starts, and a
+ *  rebuilt button must not be pressable into a second batch. */
+let fetchingMany = false
+
+/** Press Fetch on the newest waiting offers, newest first.
+ *
+ *  Each goes through fetchOffer like a row's own button, so main checks every
+ *  one again; a magnet returns once its transfer has started, so they run side
+ *  by side and are watched in their rows. One that fails stays an offer and
+ *  says why on its row -- a batch is not stopped by it. */
+async function fetchManyOffers(): Promise<void> {
+  if (fetchingMany) return
+  fetchingMany = true
+  try {
+    const waiting = (await shell.offers()).filter((o) => o.state === 'offered').slice(0, FETCH_MANY)
+    for (const o of waiting) pressedOffers.set(o.envelopeHash, o)
+    await refreshFeed()
+    for (const o of waiting) {
+      await shell.fetchOffer(o.envelopeHash).catch(() => undefined)
+    }
+  } finally {
+    fetchingMany = false
+    await refreshFeed()
+  }
+}
+
+/** How many waiting offers from one author before the feed mentions subscribing. */
+const SUBSCRIBE_PROMPT_AT = 3
+const SUB_LATER_KEY = 'sh-subscribe-later:'
+
+/** One line above a pile of one author's offers: you can stop pressing Fetch.
+ *
+ *  Subscribing already exists, in People, where nobody working through a
+ *  backlog is looking. Shown only for an author main says can be subscribed to
+ *  (their own public letter binds the key that posted these) and is not
+ *  already, for whoever has the most waiting; dismissed per author, for good.
+ *  It opens the same dialog People does -- this line fetches nothing itself. */
+function subscribePrompt(offers: OfferRow[]): HTMLElement | null {
+  const piles = new Map<string, { o: OfferRow; n: number }>()
+  for (const o of offers) {
+    if (o.state !== 'offered' || !o.posterAuthor || o.posterSubscribed) continue
+    const pile = piles.get(o.poster)
+    if (pile) pile.n++
+    else piles.set(o.poster, { o, n: 1 })
+  }
+  const later = (poster: string): boolean => {
+    try {
+      return localStorage.getItem(SUB_LATER_KEY + poster) === '1'
+    } catch {
+      return false
+    }
+  }
+  const top = [...piles.values()].filter((p) => p.n >= SUBSCRIBE_PROMPT_AT && !later(p.o.poster)).sort((a, b) => b.n - a.n)[0]
+  if (!top?.o.posterAuthor) return null
+  const author = top.o.posterAuthor
+  const name = top.o.posterName ?? short(`0x${author.key}`)
+
+  const line = el('div', 'sh-offers-subscribe')
+  line.setAttribute('data-testid', 'offers-subscribe-prompt')
+  line.setAttribute('data-author-key', author.key)
+  const text = el('span', 'sh-offers-subscribe-text', `${top.n} of these were posted by ${name}.`)
+  const sub = el('button', 'evm-btn evm-btn--secondary evm-btn--sm', 'Subscribe…')
+  sub.setAttribute('data-testid', 'offers-subscribe')
+  sub.title = `Fetch what ${name} posts as it arrives, without a press each time. Opens the choices; nothing is fetched until you confirm.`
+  sub.addEventListener('click', () => openSubscribeModal(author.scheme, author.key, name, () => void refreshFeed()))
+  const no = el('button', 'evm-btn evm-btn--ghost evm-btn--sm sh-offers-subscribe-no', '×')
+  no.setAttribute('data-testid', 'offers-subscribe-dismiss')
+  no.title = `Do not suggest this for ${name} again. Subscribing stays available in People.`
+  no.addEventListener('click', () => {
+    try {
+      localStorage.setItem(SUB_LATER_KEY + top.o.poster, '1')
+    } catch {
+      /* private mode: suggested again next time */
+    }
+    void refreshFeed()
+  })
+  line.append(text, sub, no)
+  return line
 }
 
 /** A thing fetched from an offer row a moment ago, drawn where the offer was.
@@ -1952,15 +2053,52 @@ async function refreshFeed(): Promise<void> {
   const offered = new Set(offers.map((o) => o.envelopeHash))
   const arrived = [...pressedOffers.values()].filter((o) => !offered.has(o.envelopeHash))
   if (offers.length > 0 || arrived.length > 0) {
-    const title = el('div', 'sh-feed-title', `Offered · ${offers.length}`)
-    title.setAttribute('data-testid', 'feed-offers-title')
-    title.title = 'Letters a relay says exist. Nothing has been downloaded — pressing Fetch is what contacts anybody.'
+    const title = el('div', 'sh-feed-title sh-feed-head')
+    const label = el('span', undefined, `Offered · ${offers.length}`)
+    label.setAttribute('data-testid', 'feed-offers-title')
+    label.title = 'Letters a relay says exist. Nothing has been downloaded — pressing Fetch is what contacts anybody.'
+    title.append(label)
+    // A backlog is pressed through in batches, not one row at a time. Still a
+    // press, and it says how many: each one contacts the hosts its row names.
+    const waiting = offers.filter((o) => o.state === 'offered').length
+    if (waiting > 1) {
+      const n = Math.min(waiting, FETCH_MANY)
+      const many = el('button', 'evm-btn evm-btn--ghost evm-btn--sm sh-offers-many', fetchingMany ? 'Fetching…' : `Fetch ${n}`) as HTMLButtonElement
+      many.setAttribute('data-testid', 'offers-fetch-many')
+      many.title = `Fetch the newest ${n} at once. Each contacts the hosts its row names, exactly as its own Fetch button would.`
+      many.disabled = fetchingMany
+      many.addEventListener('click', () => void fetchManyOffers())
+      title.append(many)
+    }
     feedTop.append(title)
+    const prompt = subscribePrompt(offers)
+    if (prompt) feedTop.append(prompt)
     const held = new Map(rows.map((r) => [r.envelopeHash, r]))
     const listed = [...offers.map((o) => ({ o, here: false })), ...arrived.map((o) => ({ o, here: true }))].sort(
       (a, b) => b.o.seenAt - a.o.seenAt
     )
-    for (const { o, here } of listed) feedTop.append(here ? arrivedItem(o, held.get(o.envelopeHash)) : offerItem(o))
+    // Folded to the newest few, so a long backlog does not push the feed off
+    // the bottom of the pane. Anything in motion is always shown: a fetch in
+    // flight, one that failed after a press here, and what has arrived.
+    let quiet = 0
+    let folded = 0
+    for (const { o, here } of listed) {
+      const busy = here || o.state === 'fetching' || pressedOffers.has(o.envelopeHash)
+      if (!busy && !offersExpanded && ++quiet > OFFERS_SHOWN) {
+        folded++
+        continue
+      }
+      feedTop.append(here ? arrivedItem(o, held.get(o.envelopeHash)) : offerItem(o))
+    }
+    if (folded > 0 || (offersExpanded && offers.length > OFFERS_SHOWN)) {
+      const more = el('button', 'evm-btn evm-btn--ghost evm-btn--sm sh-offers-more', offersExpanded ? 'Show fewer' : `Show ${folded} more`)
+      more.setAttribute('data-testid', 'offers-more')
+      more.addEventListener('click', () => {
+        offersExpanded = !offersExpanded
+        void refreshFeed()
+      })
+      feedTop.append(more)
+    }
   }
   const head = el('div', 'sh-feed-title sh-feed-head')
   const scopeLabel = feedScope === 'mine' ? 'By you' : feedScope === 'to' ? 'To you' : feedScope === 'replies' ? 'Replies' : 'Feed'
@@ -3449,7 +3587,8 @@ function forumPostBody(
       state: (row.offerState as OfferRow['state']) ?? 'offered',
       reason: String(row.offerReason ?? ''),
       seenAt: Number(row.receivedAt ?? 0),
-      transferId: typeof row.offerTransferId === 'string' ? row.offerTransferId : null
+      transferId: typeof row.offerTransferId === 'string' ? row.offerTransferId : null,
+      title: typeof row.offerTitle === 'string' ? row.offerTitle : null
     })
     const v = row.votes as { score: number; tribeUp: number; tribeDown: number; up: number; down: number }
     const score = el('span', 'sh-forum-score', v.score > 0 ? `+${v.score}` : String(v.score))

@@ -46,8 +46,15 @@ export const TAG = {
   type: 'thing-type',
   group: 'thing-group',
   reply: 'thing-reply',
-  fetch: 'thing-fetch'
+  fetch: 'thing-fetch',
+  /** What a POINTER says its thing is called. The poster's claim about bytes
+   *  nobody has read; an inline event has no use for it. */
+  title: 'thing-title'
 } as const
+
+/** A title tag longer than this is ignored whole, not trimmed: what is shown
+ *  is cut much shorter anyway (library/title.ts). */
+export const MAX_TITLE_TAG = 512
 
 export interface ThingEventInput {
   envelopeHash: string
@@ -56,6 +63,8 @@ export interface ThingEventInput {
   bundle?: Uint8Array
   /** Where to get it, when the bundle is too large to carry. */
   fetchLocator?: string
+  /** Pointer only: what the thing calls itself, for a row nobody can open yet. */
+  title?: string
   group?: string
   replyTo?: string
   createdAt: number
@@ -89,6 +98,7 @@ export async function buildThingEvent(
   if (input.group) tags.push([TAG.group, input.group])
   if (input.replyTo) tags.push([TAG.reply, input.replyTo])
   if (input.fetchLocator) tags.push([TAG.fetch, input.fetchLocator])
+  if (input.fetchLocator && !input.bundle && input.title) tags.push([TAG.title, input.title])
 
   const unsigned = {
     pubkey: toHex(schnorr.getPublicKey(nostrPrivkey)),
@@ -160,6 +170,8 @@ export interface ParsedThingEvent {
   group: string | null
   replyTo: string | null
   fetchLocator: string | null
+  /** The `thing-title` tag as posted: unsanitized, bounded only in length. */
+  title: string | null
   bundle: Uint8Array | null
 }
 
@@ -209,6 +221,7 @@ export function parseThingEvent(raw: unknown, maxBundleBytes: number): ParsedThi
     group: firstTag(ev, TAG.group),
     replyTo: firstTag(ev, TAG.reply),
     fetchLocator: firstTag(ev, TAG.fetch),
+    title: ((t) => (t && t.length <= MAX_TITLE_TAG ? t : null))(firstTag(ev, TAG.title)),
     bundle
   }
 }
