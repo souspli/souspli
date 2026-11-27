@@ -283,3 +283,66 @@ test('People → Subscribe… records the subscription and starts a private memo
   await chromeEval(`window.__shellChrome.openPeople()`)
   await expect.poll(() => chromeEval<string | undefined>(`document.querySelector('${btn}')?.dataset.subscribed`)).toBe('true')
 })
+
+test('a pile of one author’s offers suggests subscribing, from the feed', async () => {
+  const pub = publisher()
+  await know(pub)
+  const stranger = schnorr.utils.randomSecretKey()
+  const prompt = `document.querySelector('[data-testid=offers-subscribe-prompt]')`
+
+  // A stranger's pile suggests nothing: there is nobody to subscribe to.
+  const letters: { hash: string }[] = []
+  for (let i = 0; i < 3; i++) {
+    const l = await letter(pub, `/s${i}.thing`, 20 + i)
+    await pointer(stranger, l.hash, `${base}/s${i}.thing`)
+    letters.push(l)
+  }
+  await expect.poll(async () => (await shell.offers()).length, { timeout: 15_000 }).toBe(3)
+  // Two from the author is not yet a pile.
+  for (let i = 0; i < 2; i++) {
+    const l = await letter(pub, `/p${i}.thing`, 30 + i)
+    await pointer(pub.nostrPriv, l.hash, `${base}/p${i}.thing`)
+    letters.push(l)
+  }
+  await expect.poll(async () => (await shell.offers()).length, { timeout: 15_000 }).toBe(5)
+  await new Promise((r) => setTimeout(r, 500))
+  expect(await chromeEval<boolean>(`!!${prompt}`)).toBe(false)
+
+  // The third is.
+  const third = await letter(pub, '/p2.thing', 32)
+  await pointer(pub.nostrPriv, third.hash, `${base}/p2.thing`)
+  await expect.poll(() => chromeEval<string | null>(`${prompt}?.textContent ?? null`), { timeout: 15_000 }).toMatch(/3 of these were posted by/)
+  expect(await chromeEval<string>(`${prompt}.getAttribute('data-author-key')`)).toBe(pub.key)
+  expect(hits, 'the suggestion fetched nothing').toEqual([])
+
+  // It opens the same dialog People does; confirming catches up on the pile.
+  await chromeEval(`document.querySelector('[data-testid=offers-subscribe]').click()`)
+  await expect.poll(() => chromeEval<boolean>(`!!document.querySelector('[data-testid=subscribe-modal]')`)).toBe(true)
+  expect(hits, 'nor did opening the dialog').toEqual([])
+  await chromeEval(`(() => { const t = document.querySelector('[data-testid=subscribe-tell]'); t.checked = false })()`)
+  await chromeEval(`document.querySelector('[data-testid=subscribe-save]').click()`)
+  await expect.poll(held, { timeout: 15_000 }).toContain(third.hash)
+  // Subscribed, so there is nothing left to suggest; the stranger's still wait.
+  await expect.poll(() => chromeEval<boolean>(`!!${prompt}`), { timeout: 15_000 }).toBe(false)
+  expect((await shell.offers()).filter((o) => o.state === 'offered').length).toBe(3)
+})
+
+test('the suggestion can be dismissed for an author, and stays dismissed', async () => {
+  const pub = publisher()
+  await know(pub)
+  for (let i = 0; i < 3; i++) {
+    const l = await letter(pub, `/d${i}.thing`, 40 + i)
+    await pointer(pub.nostrPriv, l.hash, `${base}/d${i}.thing`)
+  }
+  const prompt = `document.querySelector('[data-testid=offers-subscribe-prompt]')`
+  await expect.poll(() => chromeEval<boolean>(`!!${prompt}`), { timeout: 15_000 }).toBe(true)
+  await chromeEval(`document.querySelector('[data-testid=offers-subscribe-dismiss]').click()`)
+  await expect.poll(() => chromeEval<boolean>(`!!${prompt}`), { timeout: 15_000 }).toBe(false)
+  // Another offer from them redraws the feed; it is not suggested again.
+  const l = await letter(pub, '/d3.thing', 43)
+  await pointer(pub.nostrPriv, l.hash, `${base}/d3.thing`)
+  await expect.poll(async () => (await shell.offers()).length, { timeout: 15_000 }).toBe(4)
+  await new Promise((r) => setTimeout(r, 500))
+  expect(await chromeEval<boolean>(`!!${prompt}`)).toBe(false)
+  expect(await shell.subscriptions()).toEqual([])
+})

@@ -481,6 +481,20 @@ body {
 /* The Offered header's batch press, and the fold at the end of the list. */
 .sh-offers-many { padding: 1px 8px; font-size: var(--evm-text-xs); text-transform: none; letter-spacing: normal; }
 .sh-offers-more { display: block; width: 100%; margin-bottom: var(--evm-space-2); font-size: var(--evm-text-xs); color: var(--evm-text-2); }
+/* The suggestion to subscribe, above a pile of one author's offers. */
+.sh-offers-subscribe {
+  display: flex;
+  align-items: center;
+  gap: var(--evm-space-2);
+  padding: var(--evm-space-2) var(--evm-space-3);
+  margin-bottom: var(--evm-space-2);
+  border: 1px solid var(--evm-border);
+  border-radius: var(--evm-radius-md);
+  font-size: var(--evm-text-xs);
+  color: var(--evm-text-2);
+}
+.sh-offers-subscribe-text { flex: 1; min-width: 0; }
+.sh-offers-subscribe-no { padding: 0 6px; }
 /* Fetched from an offer a moment ago, and shown where the offer was. A real
    feed row now, marked so it is plain which of these rows have landed. */
 .sh-feed-item--arrived { border-left: 2px solid var(--evm-success); background: var(--evm-success-faint); }
