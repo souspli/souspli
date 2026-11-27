@@ -241,6 +241,91 @@ test('a magnet pointer is offered too — the case pointers exist for', async ()
   expect(await shell.transfers()).toMatchObject({ downloads: [] })
 })
 
+// ── The row is where a fetch is watched ──────────────────────────────────────
+// Fetch used to open the Transfers window over the list. A letter is small and
+// lands before the window can be read, and the window then had to be closed
+// before the next row could be pressed. So the row itself shows the fetch, and
+// what arrives takes the row's place.
+
+async function chromeEval<T>(js: string): Promise<T> {
+  return shell.app.evaluate(async (electron, code) => {
+    const wc = electron.webContents
+      .getAllWebContents()
+      .find((w) => !w.isDestroyed() && w.getURL().includes('shell/chrome'))
+    if (!wc) throw new Error('no chrome webContents')
+    return (await wc.executeJavaScript(code)) as never
+  }, js) as Promise<T>
+}
+const row = (hash: string): string => `document.querySelector('[data-testid=offer-item][data-envelope-hash="${hash}"]')`
+
+test('an offer row says who posted it and what Fetch contacts, not a raw locator', async () => {
+  const t = await thing()
+  const magnet = `magnet:?xt=urn:btih:${'c'.repeat(40)}&dn=big.thing&tr=${encodeURIComponent('udp://tracker.example:6969/announce')}&ws=${encodeURIComponent('https://seed.example/big.thing')}`
+  await advertise({ hash: t.hash, locator: magnet })
+  await expect.poll(() => chromeEval<boolean>(`!!${row(t.hash)}`), { timeout: 15_000 }).toBe(true)
+
+  const text = await chromeEval<string>(`${row(t.hash)}.textContent`)
+  expect(text).toMatch(/posted by/i)
+  expect(text).toMatch(/BitTorrent · tracker\.example, seed\.example/)
+  expect(text, 'the magnet itself is not the row').not.toMatch(/btih|magnet:/)
+  // Still there for whoever wants it: the whole locator, before the press.
+  expect(await chromeEval<string>(`${row(t.hash)}.title`)).toContain(magnet)
+})
+
+test('pressing Fetch opens no window; what arrives takes the row’s place', async () => {
+  const t = await thing()
+  routes.set('/big.thing', t.bytes)
+  await advertise({ hash: t.hash, locator: `${base}/big.thing` })
+  await expect.poll(() => chromeEval<boolean>(`!!${row(t.hash)}`), { timeout: 15_000 }).toBe(true)
+
+  await chromeEval(`${row(t.hash)}.querySelector('[data-testid=offer-fetch]').click()`)
+  const arrived = `document.querySelector('[data-testid=offer-arrived][data-envelope-hash="${t.hash}"]')`
+  await expect.poll(() => chromeEval<boolean>(`!!${arrived}`), { timeout: 15_000 }).toBe(true)
+  expect(await chromeEval<boolean>(`!!document.querySelector('[data-testid=transfers-modal]')`)).toBe(false)
+  expect(await chromeEval<boolean>(`!!${row(t.hash)}`), 'no longer an offer').toBe(false)
+
+  // Opening it spends the marker: from here it is a feed row like any other.
+  await chromeEval(`${arrived}.click()`)
+  await expect.poll(() => chromeEval<boolean>(`!!${arrived}`), { timeout: 15_000 }).toBe(false)
+  expect((await shell.feed({ limit: 200 })).map((r) => r.envelopeHash)).toEqual([t.hash])
+})
+
+test('a magnet fetch is watched in its row, and cancelling gives the offer back', async () => {
+  const t = await thing()
+  await advertise({ hash: t.hash, locator: `magnet:?xt=urn:btih:${'d'.repeat(40)}&dn=big.thing` })
+  await expect.poll(() => chromeEval<boolean>(`!!${row(t.hash)}`), { timeout: 15_000 }).toBe(true)
+
+  await chromeEval(`${row(t.hash)}.querySelector('[data-testid=offer-fetch]').click()`)
+  await expect.poll(() => chromeEval<string | null>(`${row(t.hash)}?.getAttribute('data-transfer-id') ?? null`), { timeout: 15_000 }).toBeTruthy()
+  expect(await chromeEval<boolean>(`!!document.querySelector('[data-testid=transfers-modal]')`), 'no window over the list').toBe(false)
+  const id = (await chromeEval<string>(`${row(t.hash)}.getAttribute('data-transfer-id')`))!
+  // Offline there is no swarm: the row says it is looking, in its own words.
+  await expect
+    .poll(() => chromeEval<string>(`${row(t.hash)}.querySelector('[data-testid=offer-status]').textContent`), { timeout: 15_000 })
+    .toMatch(/looking for peers|starting/i)
+
+  // Progress cannot happen hermetically, so it is pushed in, as in transfers.spec.
+  await chromeEval(`window.__shellChrome.paintTransfers({
+    downloads: [{
+      id: '${id}', magnet: '', infoHash: '${'d'.repeat(40)}', name: 'big.thing', state: 'downloading',
+      bytes: 80000, downloaded: 32000, progress: 0.4, downloadSpeed: 16000, peersConnected: 1,
+      peersDiscovered: 1, silentSources: [], error: null, startedAt: Date.now()
+    }],
+    sharing: []
+  })`)
+  expect(await chromeEval<string>(`${row(t.hash)}.getAttribute('data-percent')`)).toBe('40')
+  expect(await chromeEval<string>(`${row(t.hash)}.querySelector('[data-testid=offer-status]').textContent`)).toMatch(/40% of 78 KB/)
+
+  // The same button is Cancel while it runs.
+  expect(await chromeEval<string>(`${row(t.hash)}.querySelector('[data-testid=offer-fetch]').textContent`)).toBe('Cancel')
+  await chromeEval(`${row(t.hash)}.querySelector('[data-testid=offer-fetch]').click()`)
+  await expect.poll(async () => (await offerFor(t.hash))?.state, { timeout: 15_000 }).toBe('offered')
+  expect(await shell.transfers()).toMatchObject({ downloads: [] })
+  await expect
+    .poll(() => chromeEval<string>(`${row(t.hash)}.querySelector('[data-testid=offer-fetch]').textContent`), { timeout: 15_000 })
+    .toBe('Fetch')
+})
+
 test('a magnet that names no usable infohash is not an offer', async () => {
   // It could never download -- startTransfer refuses it -- so recording it
   // would only put a dead row in front of a person, or, for a subscribed

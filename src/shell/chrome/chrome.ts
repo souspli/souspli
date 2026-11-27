@@ -194,6 +194,12 @@ interface OfferRow {
   state: 'offered' | 'fetching' | 'failed'
   reason: string
   seenAt: number
+  /** The background transfer fetching it, while a magnet is in flight. */
+  transferId?: string | null
+  /** The event's feed tag: which of a publisher's feeds. The poster's hint. */
+  feed?: string | null
+  /** A name for the POSTING key, when a public letter held here binds it. */
+  posterName?: string | null
 }
 interface KnownTypeEntry {
   key: string
@@ -1593,6 +1599,87 @@ function thingItem(row: ThingRow): HTMLElement {
   return item
 }
 
+/** "3h ago", for a row where the exact minute is noise. */
+function agoLabel(ms: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000))
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`
+  if (s < 86400 * 30) return `${Math.floor(s / 86400)}d ago`
+  return new Date(ms).toLocaleDateString()
+}
+
+/** What pressing Fetch contacts, in words: the route and the hosts it names.
+ *
+ *  A magnet is a hash and a page of percent-escapes -- shown raw it tells a
+ *  reader nothing, and the one fact worth having (whose servers hear from you)
+ *  is buried in it. The whole locator stays in the row's tooltip. */
+function locatorSummary(locator: string): string {
+  const l = locator.trim()
+  const hostOf = (u: string): string | null => {
+    try {
+      return new URL(u).hostname || null
+    } catch {
+      return null
+    }
+  }
+  if (/^magnet:/i.test(l)) {
+    const q = new URLSearchParams(l.slice(l.indexOf('?') + 1))
+    const hosts = [...new Set([...q.getAll('tr'), ...q.getAll('ws'), ...q.getAll('xs')].map(hostOf).filter((h): h is string => !!h))]
+    const shown = hosts.slice(0, 2).join(', ') + (hosts.length > 2 ? ` +${hosts.length - 2}` : '')
+    return hosts.length > 0 ? `BitTorrent · ${shown}` : 'BitTorrent · DHT only'
+  }
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(l)?.[1]?.toLowerCase() ?? 'link'
+  const host = hostOf(l)
+  return host ? `${scheme} · ${host}` : scheme
+}
+
+/** The newest transfer state main pushed, so a row drawn between pushes (the
+ *  feed redraws whenever the library changes) starts where the last one left. */
+let lastTransfers: TransferState = { downloads: [], sharing: [] }
+
+/** Offer rows whose Fetch was pressed here, by hash, until what they fetched is
+ *  opened. One that has left the offers list has arrived: it is drawn where its
+ *  offer was, because the feed proper may be a hundred offers further down. */
+const pressedOffers = new Map<string, OfferRow>()
+
+/** How a fetching row repaints itself from a transfer. Keyed by element so a
+ *  row that has been redrawn away is simply never asked. */
+const offerPainters = new WeakMap<Element, (d: DownloadRow | undefined) => void>()
+
+function paintOfferRows(state: TransferState): void {
+  lastTransfers = state
+  for (const row of document.querySelectorAll('[data-testid=offer-item][data-transfer-id]')) {
+    const id = row.getAttribute('data-transfer-id')
+    offerPainters.get(row)?.(state.downloads.find((d) => d.id === id))
+  }
+}
+
+/** A transfer in a few words, for a row a sidebar wide. The full sentence
+ *  (downloadDiagnosis) is the tooltip, and the Transfers window one click away. */
+function offerStatus(d: DownloadRow | undefined): string {
+  if (!d) return 'starting…'
+  switch (d.state) {
+    case 'starting':
+      return 'starting…'
+    case 'finding-peers':
+      return 'looking for peers…'
+    case 'peers-unreachable':
+      return 'peers found, none answering'
+    case 'stalled':
+      return 'connected, nothing arriving'
+    case 'downloading':
+      return d.bytes > 0 ? `${Math.round(d.progress * 100)}% of ${bytesLabel(d.bytes)}` : 'downloading…'
+    case 'verifying':
+    case 'admitting':
+      return 'checking the signature…'
+    case 'failed':
+      return d.error ?? 'failed'
+    default:
+      return d.state
+  }
+}
+
 /** One offered thing: a stub for something a relay says exists.
  *
  *  The mirror of a draft row, and the wording carries the whole difference
@@ -1600,9 +1687,14 @@ function thingItem(row: ThingRow): HTMLElement {
  *  poster's label, and there is NO author, because the only key in the event is
  *  the one that posted it and posting is not authoring.
  *
- *  Fetch is the press. It is the entire security boundary of this feature: the
- *  locator is shown beside it because pressing it is what contacts that
- *  address. */
+ *  Fetch is the press. It is the entire security boundary of this feature: what
+ *  it will contact is said beside it, because pressing it is what contacts
+ *  those hosts.
+ *
+ *  The fetch is watched HERE, the row filling as it arrives, and no window
+ *  opens: a letter is small and usually lands before a window could be read,
+ *  and there is a next row to press. The window is for a transfer that is
+ *  stuck, and the row's status opens it. */
 function offerItem(o: OfferRow): HTMLElement {
   const wrap = el('div', 'sh-offer')
   wrap.setAttribute('data-testid', 'offer-item')
@@ -1611,37 +1703,82 @@ function offerItem(o: OfferRow): HTMLElement {
 
   const line = el('div', 'sh-feed-line')
   line.append(el('span', 'evm-badge evm-badge--neutral', o.type || 'letter'))
-  const claim = el('span', 'sh-offer-claim', 'offered — not fetched')
+  const claim = el('button', 'sh-offer-claim', 'offered — not fetched') as HTMLButtonElement
+  claim.setAttribute('data-testid', 'offer-status')
+  claim.disabled = true
   line.append(claim)
   const fetchBtn = el('button', 'evm-btn evm-btn--secondary evm-btn--sm sh-offer-fetch', 'Fetch') as HTMLButtonElement
   fetchBtn.setAttribute('data-testid', 'offer-fetch')
-  fetchBtn.disabled = o.state === 'fetching'
-  if (o.state === 'fetching') fetchBtn.textContent = 'Fetching…'
+  line.append(fetchBtn)
+  wrap.append(line)
+
+  let transferId: string | null = null
+  const paint = (d: DownloadRow | undefined): void => {
+    wrap.setAttribute('data-download-state', d?.state ?? 'starting')
+    claim.textContent = offerStatus(d)
+    claim.title = `${d ? downloadDiagnosis(d) : 'Starting…'}\n\nClick for the Transfers window.`
+    // Filled only where there is something to measure: before the size is
+    // known the row sweeps instead, since 0% would claim a start not made.
+    const measured = !!d && d.bytes > 0
+    wrap.classList.toggle('sh-offer--measured', measured)
+    wrap.classList.toggle('sh-offer--trouble', d?.state === 'peers-unreachable' || d?.state === 'stalled' || d?.state === 'failed')
+    const pct = d?.state === 'verifying' || d?.state === 'admitting' ? 100 : Math.round((d?.progress ?? 0) * 100)
+    wrap.style.setProperty('--sh-offer-progress', `${measured ? pct : 0}%`)
+    wrap.setAttribute('data-percent', String(measured ? pct : 0))
+  }
+  /** Put the row into its fetching look. With a transfer it can be watched and
+   *  cancelled; a plain link is one request that either returns or fails. */
+  const fetching = (id: string | null): void => {
+    transferId = id
+    wrap.classList.add('sh-offer--fetching')
+    wrap.setAttribute('data-state', 'fetching')
+    if (id) {
+      wrap.setAttribute('data-transfer-id', id)
+      offerPainters.set(wrap, paint)
+      claim.disabled = false
+      fetchBtn.disabled = false
+      fetchBtn.textContent = 'Cancel'
+      fetchBtn.title = 'Stop fetching. It goes back to being an offer.'
+      paint(lastTransfers.downloads.find((d) => d.id === id))
+    } else {
+      claim.textContent = 'fetching…'
+      fetchBtn.disabled = true
+      fetchBtn.textContent = 'Fetching…'
+    }
+  }
+  claim.addEventListener('click', () => {
+    if (transferId) openTransfersModal(transferId)
+  })
   fetchBtn.addEventListener('click', async () => {
-    fetchBtn.disabled = true
-    fetchBtn.textContent = 'Fetching…'
+    if (transferId) {
+      fetchBtn.disabled = true
+      pressedOffers.delete(o.envelopeHash)
+      await shell.cancelTransfer(transferId) // main redraws the feed
+      return
+    }
+    pressedOffers.set(o.envelopeHash, o)
+    fetching(null)
     const r = await shell.fetchOffer(o.envelopeHash)
-    if (r.status === 'started' && typeof r.transferId === 'string') {
-      // A magnet may run for hours; show it where progress lives rather than
-      // leaving a button to imply it is done.
-      openTransfersModal(r.transferId)
-    } else if (r.error || r.status === 'invalid') {
+    if (r.error || r.status === 'invalid') {
+      pressedOffers.delete(o.envelopeHash)
       showText(String(r.error ?? r.reason ?? 'could not fetch it'), 'danger')
     }
     await refreshFeed()
   })
-  line.append(fetchBtn)
-  wrap.append(line)
+  if (o.state === 'fetching') fetching(o.transferId ?? null)
+  if (o.state === 'failed') fetchBtn.textContent = 'Retry'
 
-  // What pressing Fetch will actually contact, and who said so. Both before
-  // the press, because after it they are no longer a choice.
-  const from = el('div', 'sh-offer-meta')
-  from.setAttribute('data-testid', 'offer-locator')
-  from.textContent = `${o.locator.length > 64 ? `${o.locator.slice(0, 61)}…` : o.locator}`
-  from.title = `${o.locator}\n\nOffered by ${o.poster || 'an unknown key'}${
+  // Who said it exists, and what pressing Fetch will contact. Both before the
+  // press, because after it they are no longer a choice.
+  const who = o.posterName ? `posted by ${o.posterName}` : `posted by ${short(o.poster || 'an unknown key')}`
+  const from = el('div', 'sh-offer-meta', [who, o.feed, agoLabel(o.seenAt)].filter(Boolean).join(' · '))
+  from.setAttribute('data-testid', 'offer-from')
+  const via = el('div', 'sh-offer-meta sh-offer-via', `via ${locatorSummary(o.locator)}`)
+  via.setAttribute('data-testid', 'offer-locator')
+  wrap.title = `${o.locator}\n\nOffered by ${o.posterName ? `${o.posterName} (${o.poster})` : o.poster || 'an unknown key'}${
     o.relayUrl ? ` on ${o.relayUrl}` : ''
-  }. That is who told you about it — not who wrote it, which nobody here knows until it is fetched.`
-  wrap.append(from)
+  }, seen ${fmtTime(o.seenAt)}. That is who told you about it — not who wrote it, which nobody here knows until it is fetched.`
+  wrap.append(from, via)
 
   if (o.state === 'failed' && o.reason) {
     const why = el('div', 'sh-offer-meta sh-offer-failed', o.reason)
@@ -1649,6 +1786,31 @@ function offerItem(o: OfferRow): HTMLElement {
     wrap.append(why)
   }
   return wrap
+}
+
+/** A thing fetched from an offer row a moment ago, drawn where the offer was.
+ *
+ *  It is a real feed row when the feed has it (signed, authored, titled); when
+ *  the current filter hides it, a plain row that still opens it. Either way it
+ *  is spent once opened: from then on it lives in the feed like anything else. */
+function arrivedItem(o: OfferRow, row: ThingRow | undefined): HTMLElement {
+  let item: HTMLElement
+  if (row) item = thingItem(row)
+  else {
+    item = el('button', 'sh-feed-item')
+    const line = el('div', 'sh-feed-line')
+    line.append(el('span', 'evm-badge evm-badge--neutral', o.type || 'letter'), el('span', 'sh-feed-author', 'fetched — open it'))
+    item.append(line)
+    item.addEventListener('click', () => void openThing(o.envelopeHash))
+  }
+  item.classList.add('sh-feed-item--arrived')
+  item.setAttribute('data-testid', 'offer-arrived')
+  item.setAttribute('data-envelope-hash', o.envelopeHash)
+  item.addEventListener('click', () => {
+    pressedOffers.delete(o.envelopeHash)
+    void refreshFeed()
+  })
+  return item
 }
 
 /** A local, unsigned draft. Same grid so the columns still line up. */
@@ -1785,12 +1947,20 @@ async function refreshFeed(): Promise<void> {
   // and shown the same way — its own section, never mixed into the feed, so
   // nothing unfetched can be mistaken for something you hold. Like drafts, the
   // Mine/All scope does not apply: nobody knows who wrote these yet.
-  if (offers.length > 0) {
+  // One fetched from here a moment ago has left `offers`; it keeps its place
+  // in this list (newest first, like the offers) until it is opened.
+  const offered = new Set(offers.map((o) => o.envelopeHash))
+  const arrived = [...pressedOffers.values()].filter((o) => !offered.has(o.envelopeHash))
+  if (offers.length > 0 || arrived.length > 0) {
     const title = el('div', 'sh-feed-title', `Offered · ${offers.length}`)
     title.setAttribute('data-testid', 'feed-offers-title')
     title.title = 'Letters a relay says exist. Nothing has been downloaded — pressing Fetch is what contacts anybody.'
     feedTop.append(title)
-    for (const o of offers) feedTop.append(offerItem(o))
+    const held = new Map(rows.map((r) => [r.envelopeHash, r]))
+    const listed = [...offers.map((o) => ({ o, here: false })), ...arrived.map((o) => ({ o, here: true }))].sort(
+      (a, b) => b.o.seenAt - a.o.seenAt
+    )
+    for (const { o, here } of listed) feedTop.append(here ? arrivedItem(o, held.get(o.envelopeHash)) : offerItem(o))
   }
   const head = el('div', 'sh-feed-title sh-feed-head')
   const scopeLabel = feedScope === 'mine' ? 'By you' : feedScope === 'to' ? 'To you' : feedScope === 'replies' ? 'Replies' : 'Feed'
@@ -3278,7 +3448,8 @@ function forumPostBody(
       replyTo: null,
       state: (row.offerState as OfferRow['state']) ?? 'offered',
       reason: String(row.offerReason ?? ''),
-      seenAt: Number(row.receivedAt ?? 0)
+      seenAt: Number(row.receivedAt ?? 0),
+      transferId: typeof row.offerTransferId === 'string' ? row.offerTransferId : null
     })
     const v = row.votes as { score: number; tribeUp: number; tribeDown: number; up: number; down: number }
     const score = el('span', 'sh-forum-score', v.score > 0 ? `+${v.score}` : String(v.score))
@@ -4599,7 +4770,10 @@ forumBtn.addEventListener('click', () => {
    *  reading are the ones a hermetic test cannot produce -- a peer that is
    *  discovered but will not answer needs a real unreachable peer -- and the
    *  wording for exactly that case is the point of the window. */
-  paintTransfers: (state: TransferState) => transfersPainter?.(state),
+  paintTransfers: (state: TransferState) => {
+    transfersPainter?.(state)
+    paintOfferRows(state)
+  },
   openRelays: openRelaysModal,
   openForums: openForumsModal,
   openForum: openForumModal,
@@ -4694,8 +4868,12 @@ shell.onPublishResult((o) => {
 shell.onOpenSharing(() => openTransfersModal())
 shell.onOpenRelays(() => openRelaysModal())
 shell.onOpenForums(() => void openForumsModal())
-// Pushed while anything is in flight; ignored when the window is closed.
-shell.onTransfers((state) => transfersPainter?.(state))
+// Pushed while anything is in flight: to the Transfers window when it is open,
+// and always to the offer rows being fetched, which is where it is watched.
+shell.onTransfers((state) => {
+  transfersPainter?.(state)
+  paintOfferRows(state)
+})
 shell.onOpenPeople(() => openPeopleModal())
 shell.onOpenAccount(() => void openAccountModal()) // File → Account & Keys…
 // A .thing double-clicked in the file manager: say what became of it, using

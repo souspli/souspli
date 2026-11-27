@@ -414,15 +414,73 @@ body {
   margin-bottom: var(--evm-space-1);
 }
 .sh-offer .sh-feed-line { align-items: center; gap: var(--evm-space-2); }
-.sh-offer-claim { flex: 1; font-size: var(--evm-text-sm); color: var(--evm-text-2); font-style: italic; }
+/* The status is a button only so a fetch in flight can open the Transfers
+   window; at rest it is disabled and reads as the plain text it was. */
+.sh-offer-claim {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--evm-text-sm);
+  color: var(--evm-text-2);
+  font-style: italic;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sh-offer-claim:enabled { cursor: pointer; }
+.sh-offer-claim:enabled:hover { text-decoration: underline; }
 .sh-offer-fetch { flex: 0 0 auto; }
 .sh-offer-meta {
   margin-top: 2px;
-  font-family: var(--evm-font-mono);
-  font-size: var(--evm-text-sm);
+  font-size: var(--evm-text-xs);
   color: var(--evm-text-2);
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
+.sh-offer-via { color: var(--evm-text-3); }
+/* Fetching: the row is its own progress bar. Filled to the fraction arrived
+   once the size is known; before that there is nothing to measure, so a band
+   sweeps instead of a bar sitting at a 0% that would claim a start. */
+.sh-offer--fetching {
+  border-left-style: solid;
+  border-left-color: var(--evm-accent);
+  border-radius: 0 var(--evm-radius-md) var(--evm-radius-md) 0;
+  background-image: linear-gradient(90deg, transparent 0%, var(--evm-accent-muted) 50%, transparent 100%);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: sh-offer-sweep 1.4s linear infinite;
+}
+.sh-offer--fetching.sh-offer--measured {
+  background-image: linear-gradient(var(--evm-accent-muted), var(--evm-accent-muted));
+  background-size: var(--sh-offer-progress, 0%) 100%;
+  background-position: 0 0;
+  animation: none;
+  transition: background-size 0.3s linear;
+}
+/* Found nobody who will answer, or nothing is arriving: stop moving, because
+   motion would say it is going well. */
+.sh-offer--fetching.sh-offer--trouble {
+  border-left-color: var(--evm-warning);
+  background-image: none;
+  background-color: var(--evm-warning-faint);
+  animation: none;
+}
+.sh-offer--trouble .sh-offer-claim { color: var(--evm-warning); }
+@keyframes sh-offer-sweep {
+  from { background-position: -100% 0; }
+  to { background-position: 200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sh-offer--fetching { animation: none; background-size: 100% 100%; }
+}
+/* Fetched from an offer a moment ago, and shown where the offer was. A real
+   feed row now, marked so it is plain which of these rows have landed. */
+.sh-feed-item--arrived { border-left: 2px solid var(--evm-success); background: var(--evm-success-faint); }
 .sh-offer-failed { color: var(--evm-danger); font-family: inherit; }
 
 /* Votes. The score and the tribe count sit side by side on purpose: they are
