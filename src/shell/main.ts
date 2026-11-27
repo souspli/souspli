@@ -2478,6 +2478,7 @@ app.whenReady().then(async () => {
         offered: true,
         offerState: o.state,
         offerReason: o.reason,
+        offerTransferId: o.transferId,
         locator: o.locator,
         poster: o.poster,
         relayUrl: o.relayUrl,
@@ -3377,6 +3378,14 @@ app.whenReady().then(async () => {
 
   function cancelTransfer(id: unknown): Record<string, unknown> {
     if (typeof id !== 'string') return { cancelled: false }
+    // An offer this was discharging goes back to being an offer: left as
+    // "fetching" it would show a transfer that no longer exists, with no
+    // button to try again.
+    const owed = library.offerForTransfer(id)
+    if (owed) {
+      library.setOfferState(owed.envelopeHash, 'offered')
+      notifyFeedChanged()
+    }
     const forgotten = library.forgetTransfer(id)
     const stopped = seeder.cancelDownload(id)
     pushTransfers()
@@ -3908,7 +3917,21 @@ app.whenReady().then(async () => {
   /** Everything a relay has offered that this library does not hold. */
   function offerList(inGroup?: unknown): Record<string, unknown>[] {
     const q = typeof inGroup === 'string' && HEX64.test(inGroup) ? { inGroup } : {}
-    return library.offers(q).map((o) => ({ ...o }))
+    // Who the posting key belongs to, when a public letter held here binds it
+    // (Author.ek): a name for the row in place of a locator nobody can read.
+    // Still the POSTER -- who wrote the thing is unknown until it is fetched.
+    const names = new Map<string, string | null>()
+    const nameOf = (poster: string): string | null => {
+      if (!names.has(poster)) {
+        const author = library.authorOfEncKey(poster)
+        names.set(
+          poster,
+          author ? (library.petname(author.scheme, author.key)?.name ?? library.selfName(author.scheme, author.key) ?? null) : null
+        )
+      }
+      return names.get(poster) ?? null
+    }
+    return library.offers(q).map((o) => ({ ...o, posterName: nameOf(o.poster) }))
   }
 
   /** Fetch an offered thing. THE PRESS: nothing calls this on its own, except
