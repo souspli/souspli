@@ -2479,6 +2479,7 @@ app.whenReady().then(async () => {
         offerState: o.state,
         offerReason: o.reason,
         offerTransferId: o.transferId,
+        offerTitle: o.title,
         locator: o.locator,
         poster: o.poster,
         relayUrl: o.relayUrl,
@@ -3613,6 +3614,9 @@ app.whenReady().then(async () => {
         inGroup: ev.group,
         replyTo: ev.replyTo,
         feed: feedTagOf(ev),
+        // Sanitized before it is stored, like a letter's own title: it is a
+        // stranger's text on its way into trusted chrome.
+        title: ev.title ? sanitizeTitle(ev.title) : null,
         now: Date.now()
       })
       if (noted) notifyFeedChanged()
@@ -4050,7 +4054,8 @@ app.whenReady().then(async () => {
       {
         envelopeHash,
         type: row.type,
-        ...(inline ? { bundle: exported.tar } : { fetchLocator: locator! }),
+        // A pointer says what it points at, since the row it becomes cannot.
+        ...(inline ? { bundle: exported.tar } : { fetchLocator: locator!, ...(row.title ? { title: row.title } : {}) }),
         // `thing-group` is which FORUM this belongs to. A thing's own chain
         // path is a different fact entirely -- it says which line of versions
         // this is -- and tagging an event with it would put every amended

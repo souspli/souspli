@@ -83,6 +83,9 @@ export interface OfferRow {
   seenAt: number
   /** The event's `thing-feed` tag: which of a publisher's feeds this is. A hint. */
   feed: string | null
+  /** What the POSTER says the thing is called (the event's `thing-title`),
+   *  sanitized like any title. Not the letter's own title: nobody has read it. */
+  title: string | null
   /** Set when a subscription fetched this rather than a press: the author the
    *  letter must turn out to be signed by, or it is refused. */
   owedAuthor: { scheme: string; key: string } | null
@@ -124,6 +127,7 @@ type OfferDbRow = {
   transfer_id: string | null
   seen_at: number
   feed?: string | null
+  title?: string | null
   owed_scheme?: string | null
   owed_key?: string | null
 }
@@ -141,6 +145,7 @@ const toOfferRow = (r: OfferDbRow): OfferRow => ({
   transferId: r.transfer_id,
   seenAt: r.seen_at,
   feed: r.feed ?? null,
+  title: r.title ?? null,
   owedAuthor: r.owed_scheme && r.owed_key ? { scheme: r.owed_scheme, key: r.owed_key } : null
 })
 
@@ -168,7 +173,7 @@ function toSubscription(r: SubscriptionDbRow): SubscriptionRow {
 }
 
 /** Every offers read goes through this, so the extra columns come along. */
-const OFFERS = `SELECT o.*, x.feed, x.owed_scheme, x.owed_key FROM offers o LEFT JOIN offer_extra x ON x.envelope_hash = o.envelope_hash`
+const OFFERS = `SELECT o.*, x.feed, x.owed_scheme, x.owed_key, n.title FROM offers o LEFT JOIN offer_extra x ON x.envelope_hash = o.envelope_hash LEFT JOIN offer_title n ON n.envelope_hash = o.envelope_hash`
 
 export interface FeedQuery {
   type?: string
@@ -793,6 +798,12 @@ export class Library {
         owed_scheme   TEXT,
         owed_key      TEXT,
         auto_at       INTEGER
+      );
+      -- What a pointer's poster says its thing is called. Its own table for
+      -- the reason offer_extra is one: an older version already made that.
+      CREATE TABLE IF NOT EXISTS offer_title (
+        envelope_hash TEXT PRIMARY KEY,
+        title         TEXT NOT NULL
       );
       -- Feed names each relay key has used, kept after its offers are fetched
       -- or dropped, so a Subscribe dialog can still offer the choice. Bounded
@@ -1517,6 +1528,8 @@ export class Library {
     inGroup: string | null
     replyTo: string | null
     feed?: string | null
+    /** Already sanitized by the caller (sanitizeTitle). */
+    title?: string | null
     now: number
   }): boolean {
     if (this.get(o.envelopeHash)) return false
@@ -1538,6 +1551,9 @@ export class Library {
     this.db
       .prepare('INSERT OR REPLACE INTO offer_extra (envelope_hash, feed, owed_scheme, owed_key, auto_at) VALUES (?,?,NULL,NULL,NULL)')
       .run(o.envelopeHash, o.feed ?? null)
+    // The newest advertisement's title stands, including its having none.
+    this.db.prepare('DELETE FROM offer_title WHERE envelope_hash = ?').run(o.envelopeHash)
+    if (o.title) this.db.prepare('INSERT INTO offer_title (envelope_hash, title) VALUES (?,?)').run(o.envelopeHash, o.title)
     if (o.feed) {
       this.db.prepare('INSERT OR REPLACE INTO poster_feeds (poster, feed, last_seen) VALUES (?,?,?)').run(o.poster, o.feed, o.now)
       // A poster can name feeds forever; keep its newest few dozen.
@@ -1556,6 +1572,7 @@ export class Library {
       )
       .run(this.maxOffers)
     this.db.prepare('DELETE FROM offer_extra WHERE envelope_hash NOT IN (SELECT envelope_hash FROM offers)').run()
+    this.db.prepare('DELETE FROM offer_title WHERE envelope_hash NOT IN (SELECT envelope_hash FROM offers)').run()
     return true
   }
 
@@ -1596,6 +1613,7 @@ export class Library {
 
   dropOffer(envelopeHash: string): boolean {
     this.db.prepare('DELETE FROM offer_extra WHERE envelope_hash = ?').run(envelopeHash)
+    this.db.prepare('DELETE FROM offer_title WHERE envelope_hash = ?').run(envelopeHash)
     return this.db.prepare('DELETE FROM offers WHERE envelope_hash = ?').run(envelopeHash).changes > 0
   }
 

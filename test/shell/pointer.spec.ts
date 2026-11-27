@@ -76,6 +76,7 @@ async function advertise(opts: {
   locator: string
   type?: string
   group?: string
+  title?: string
 }): Promise<void> {
   relay.broadcast(
     await buildThingEvent(
@@ -84,6 +85,7 @@ async function advertise(opts: {
         type: opts.type ?? 'nametag',
         fetchLocator: opts.locator,
         ...(opts.group ? { group: opts.group } : {}),
+        ...(opts.title ? { title: opts.title } : {}),
         createdAt: Math.floor(Date.now() / 1000)
       },
       schnorr.utils.randomSecretKey()
@@ -324,6 +326,32 @@ test('a magnet fetch is watched in its row, and cancelling gives the offer back'
   await expect
     .poll(() => chromeEval<string>(`${row(t.hash)}.querySelector('[data-testid=offer-fetch]').textContent`), { timeout: 15_000 })
     .toBe('Fetch')
+})
+
+test('a pointer’s title is shown as the poster’s claim, sanitized, and gives way to the letter’s own', async () => {
+  const t = await thing()
+  routes.set('/big.thing', t.bytes)
+  // A check mark is the chrome's word for VERIFIED, and a bidi override can
+  // reorder a row: neither survives, exactly as in a held letter's title.
+  await advertise({ hash: t.hash, locator: `${base}/big.thing`, title: '✓ verified:‮ New York bans AI toys\nsecond line' })
+  await expect.poll(() => chromeEval<boolean>(`!!${row(t.hash)}`), { timeout: 15_000 }).toBe(true)
+
+  expect((await offerFor(t.hash))!.title).toBe('verified: New York bans AI toys')
+  const shown = `${row(t.hash)}.querySelector('[data-testid=offer-title]')`
+  expect(await chromeEval<string>(`${shown}.textContent`)).toBe('verified: New York bans AI toys')
+  expect(await chromeEval<string>(`${shown}.title`)).toMatch(/whoever posted this says/i)
+  expect(hits, 'a title fetched nothing').toEqual([])
+
+  // An absurdly long tag is ignored whole; the offer still stands, untitled.
+  const u = await thing()
+  await advertise({ hash: u.hash, locator: `${base}/u.thing`, title: 'x'.repeat(513) })
+  await expect.poll(async () => (await offerFor(u.hash))?.state, { timeout: 15_000 }).toBe('offered')
+  expect((await offerFor(u.hash))!.title).toBeNull()
+
+  // Fetched, the claim is gone with the offer: the row is the letter's own.
+  await shell.fetchOffer(t.hash)
+  await expect.poll(async () => (await shell.feed({ limit: 200 })).length, { timeout: 15_000 }).toBe(1)
+  expect(await offerFor(t.hash)).toBeUndefined()
 })
 
 test('a backlog folds to the newest few, and Fetch N presses a batch', async () => {
